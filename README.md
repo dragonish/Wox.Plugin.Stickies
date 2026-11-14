@@ -2,6 +2,8 @@
 
 Create, browse, search and manage [Stickies](https://www.zhornsoftware.co.uk/stickies/index.html) notes from Wox.
 
+![Stickies command list in Wox](screenshot.jpg)
+
 ## Requirements
 
 - Windows with Windows PowerShell 5.1, which ships with Windows 10 and 11.
@@ -174,3 +176,7 @@ Project layout:
 | `src/__tests__/test.ts` | Unit and metadata tests                                   |
 
 `src/stickies.ts` launches one `powershell.exe` per batch of commands. `bridge.ps1` sends each command to the Stickies main window and returns the replies as JSON; note bodies and titles use Stickies `utext`/`utitle` hex strings, so non-ASCII text is preserved. The tests run without Stickies; manual testing requires Windows and a running Stickies instance.
+
+## License
+
+This project is licensed under the [Mozilla Public License 2.0](LICENSE).
