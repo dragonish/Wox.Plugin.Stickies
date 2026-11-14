@@ -1,7 +1,7 @@
 # Stickies
 
-# Install
+## Install
 
-```
+```shell
 wpm install Stickies
 ```
