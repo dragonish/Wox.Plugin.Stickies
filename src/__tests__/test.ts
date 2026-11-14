@@ -2,6 +2,7 @@ import * as fs from "node:fs"
 import * as path from "node:path"
 import { ActionContext, Context, PublicAPI, Query, Result, WoxImage } from "@wox-launcher/wox-plugin"
 import { noteListMode, parseQuery, plugin } from "../index"
+import { COMMANDS } from "../commands"
 import {
   buildGhostCommand,
   buildOnTopCommand,
@@ -391,49 +392,107 @@ describe("plugin query routing (no Stickies needed)", () => {
     await action.Action(ctx, {} as ActionContext)
   }
 
-  test("empty query returns help without touching Stickies", async () => {
+  function helpRow(results: Result[], name: string): Result {
+    const row = results.find(result => result.Id === "help-" + name)
+    if (!row) {
+      throw new Error("missing help row " + name)
+    }
+    return row
+  }
+
+  test("empty query lists every declared command without touching Stickies", async () => {
     const results = await queryResults(ctx, "")
-    expect(results.length).toBeGreaterThan(0)
+    expect(results.map(result => result.Id)).toEqual(COMMANDS.map(spec => "help-" + spec.name))
+    expect(results).toHaveLength(COMMANDS.length)
+    for (const result of results) {
+      expect(result.Group).toBe(enTranslations.help_group_title)
+    }
   })
 
-  test("default trigger keyword drives help text and navigation", async () => {
+  test("command rows show usage, description and aliases", async () => {
     const results = await queryResults(ctx, "")
-    expect(results[0].SubTitle).toContain('"' + DEFAULT_TRIGGER + '"')
-    expect(results[0].Actions?.[0].PreventHideAfterAction).toBe(true)
-    expect(results[1].Actions?.[0].PreventHideAfterAction).toBe(true)
+    for (const spec of COMMANDS) {
+      const row = helpRow(results, spec.name)
+      expect(row.Title).toBe(enTranslations[spec.usageKey])
+      expect(row.SubTitle).toBe(enTranslations[spec.descKey])
+    }
 
-    await runAction(results[0])
+    const list = helpRow(results, "list")
+    expect(list.Tails).toEqual([{ Type: "text", Text: formatTranslation(enTranslations.command_alias_tail, "ls") }])
+    const search = helpRow(results, "search")
+    expect(search.Tails).toEqual([{ Type: "text", Text: formatTranslation(enTranslations.command_alias_tail, "s") }])
+    const front = helpRow(results, "front")
+    expect(front.Tails).toEqual([{ Type: "text", Text: formatTranslation(enTranslations.command_alias_tail, "bring") }])
+  })
+
+  test("commands that need input fill the query and keep Wox open", async () => {
+    const results = await queryResults(ctx, "")
+
+    const create = helpRow(results, "new")
+    expect(create.Actions?.[0].PreventHideAfterAction).toBe(true)
+    await runAction(create)
+    expect(changeQuery).toHaveBeenCalledWith(ctx, { QueryType: "input", QueryText: DEFAULT_TRIGGER + " new " })
+
+    const search = helpRow(results, "search")
+    expect(search.Actions?.[0].PreventHideAfterAction).toBe(true)
+    await runAction(search)
+    expect(changeQuery).toHaveBeenCalledWith(ctx, { QueryType: "input", QueryText: DEFAULT_TRIGGER + " search " })
+  })
+
+  test("list and ping navigate to their own results", async () => {
+    const results = await queryResults(ctx, "")
+
+    const list = helpRow(results, "list")
+    expect(list.Actions?.[0].PreventHideAfterAction).toBe(true)
+    await runAction(list)
     expect(changeQuery).toHaveBeenCalledWith(ctx, { QueryType: "input", QueryText: DEFAULT_TRIGGER + " list" })
 
-    await runAction(results[1])
-    expect(changeQuery).toHaveBeenCalledWith(ctx, { QueryType: "input", QueryText: DEFAULT_TRIGGER + " new " })
+    const ping = helpRow(results, "ping")
+    expect(ping.Actions?.[0].PreventHideAfterAction).toBe(true)
+    await runAction(ping)
+    expect(changeQuery).toHaveBeenCalledWith(ctx, { QueryType: "input", QueryText: DEFAULT_TRIGGER + " ping" })
   })
 
-  test("custom trigger keyword flows into help text and navigation", async () => {
-    const results = await queryResults(ctx, "", "note")
-    expect(results[0].SubTitle).toContain('"note"')
-    expect(results[0].SubTitle).not.toContain('"' + DEFAULT_TRIGGER + '"')
+  test("side-effect commands run immediately from the help list", async () => {
+    const results = await queryResults(ctx, "")
+    const expected: Record<string, string> = {
+      paste: "create-paste",
+      hideall: "hide-all",
+      showall: "show-all",
+      front: "bring-forward"
+    }
+    for (const [name, id] of Object.entries(expected)) {
+      const action = helpRow(results, name).Actions?.[0]
+      expect(action?.Id).toBe(id)
+      expect(action?.IsDefault).toBe(true)
+      expect(action?.PreventHideAfterAction).toBeFalsy()
+    }
+  })
 
-    await runAction(results[0])
+  test("custom trigger keyword flows into navigation", async () => {
+    const results = await queryResults(ctx, "", "note")
+    expect(helpRow(results, "new").SubTitle).not.toContain('"' + DEFAULT_TRIGGER + '"')
+
+    await runAction(helpRow(results, "list"))
     expect(changeQuery).toHaveBeenCalledWith(ctx, { QueryType: "input", QueryText: "note list" })
   })
 
   test("falls back to an effective concrete trigger when the query has none", async () => {
     effectiveTriggers = ["note"]
     const results = await queryResults(ctx, "", "")
-    expect(results[0].SubTitle).toContain('"note"')
-
-    await runAction(results[0])
+    await runAction(helpRow(results, "list"))
     expect(changeQuery).toHaveBeenCalledWith(ctx, { QueryType: "input", QueryText: "note list" })
   })
 
-  test("global-only trigger uses generic wording and omits prefixed navigation", async () => {
+  test("global-only trigger skips navigation but keeps runnable commands", async () => {
     effectiveTriggers = ["*"]
     const results = await queryResults(ctx, "", "")
-    expect(results[0].Actions).toEqual([])
-    expect(results[1].Actions).toEqual([])
-    expect(results[0].SubTitle).toContain(enTranslations.trigger_keyword_generic)
-    expect(results[0].SubTitle).not.toContain('"' + DEFAULT_TRIGGER + '"')
+    for (const name of ["new", "search", "list", "ping"]) {
+      expect(helpRow(results, name).Actions).toEqual([])
+    }
+    for (const name of ["paste", "hideall", "showall", "front"]) {
+      expect(helpRow(results, name).Actions).toHaveLength(1)
+    }
   })
 
   test("bare text query no longer creates a note and guides to the new command", async () => {
@@ -609,6 +668,26 @@ describe("plugin metadata i18n", () => {
     expect(byName.get("list")?.Aliases).toContain("ls")
     expect(byName.get("search")?.Aliases).toContain("s")
     expect(byName.get("front")?.Aliases).toContain("bring")
+  })
+
+  test("the help command table mirrors plugin.json and has translated labels", () => {
+    const commands = pluginJson.Commands as Array<{ Command: string; Description: string; Aliases?: string[] }>
+
+    expect(COMMANDS.map(spec => spec.name)).toEqual(commands.map(command => command.Command))
+    expect(COMMANDS.map(spec => spec.aliases)).toEqual(commands.map(command => command.Aliases || []))
+    expect(COMMANDS.map(spec => spec.descKey)).toEqual(commands.map(command => command.Description.slice("i18n:".length)))
+
+    for (const spec of COMMANDS) {
+      for (const key of [spec.usageKey, spec.descKey]) {
+        expect(enTranslations[key]).toBeTruthy()
+        expect(zhTranslations[key]).toBeTruthy()
+      }
+      if (spec.kind === "run") {
+        expect(spec.suffix).toBe("")
+      } else {
+        expect(spec.suffix.length).toBeGreaterThan(0)
+      }
+    }
   })
 
   test("declares the new note title setting with translated labels", () => {

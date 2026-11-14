@@ -12,6 +12,8 @@ wpm install Stickies
 
 Type the trigger keyword (`sti` by default), then a command:
 
+Typing just the trigger keyword lists every command. Enter fills `new` / `search` with a trailing space and jumps to `list` / `ping`, while `paste`, `hideall`, `showall` and `front` run immediately.
+
 | Command                                    | Action                                         |
 | ------------------------------------------ | ---------------------------------------------- |
 | `sti new <text>`                           | Create a desktop note with the text            |

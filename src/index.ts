@@ -1,4 +1,5 @@
-import { ActionContext, Context, Plugin, PluginInitParams, PublicAPI, Query, Result, ResultAction, ResultTail, WoxImage } from "@wox-launcher/wox-plugin"
+import { ActionContext, Context, ExecuteResultAction, Plugin, PluginInitParams, PublicAPI, Query, Result, ResultAction, ResultTail, WoxImage } from "@wox-launcher/wox-plugin"
+import { COMMANDS } from "./commands"
 import {
   MAX_TEXT_LENGTH,
   StickiesError,
@@ -541,6 +542,172 @@ function noteResult(note: StickyNote, labels: NoteLabels): Result {
   }
 }
 
+/** "ping" result: report the Stickies version or a readable error. */
+async function pingResult(ctx: Context): Promise<Result> {
+  try {
+    const version = await ping()
+    return {
+      Title: await t(ctx, "ping_title", version),
+      SubTitle: await t(ctx, "ping_subtitle"),
+      Icon: appIcon,
+      Actions: []
+    }
+  } catch (err) {
+    return errorResult(ctx, err)
+  }
+}
+
+/** Clipboard note action, shared by the `paste` result and the command help row. */
+async function pasteAction(ctx: Context, titleMode: TitleMode): Promise<ExecuteResultAction> {
+  return {
+    Id: "create-paste",
+    Name: await t(ctx, "action_create"),
+    IsDefault: true,
+    Action: async (actionCtx: Context, actionContext: ActionContext) => {
+      try {
+        const id = await createStickyFromClipboard(normalizeTitleMode(actionContext.ContextData?.titleMode))
+        await notify(actionCtx, await t(actionCtx, "notify_created", id))
+      } catch (err) {
+        await notifyError(actionCtx, err)
+      }
+    },
+    ContextData: { titleMode }
+  }
+}
+
+/** Hide/show-all action, shared by the command results and the help list. */
+async function hideShowAction(ctx: Context, hiding: boolean): Promise<ExecuteResultAction> {
+  return {
+    Id: hiding ? "hide-all" : "show-all",
+    Name: hiding ? await t(ctx, "action_hideall") : await t(ctx, "action_showall"),
+    IsDefault: true,
+    Action: async (actionCtx: Context) => {
+      try {
+        if (hiding) {
+          await hideAll()
+          await notify(actionCtx, await t(actionCtx, "notify_hideall"))
+        } else {
+          await showAll()
+          await notify(actionCtx, await t(actionCtx, "notify_showall"))
+        }
+      } catch (err) {
+        await notifyError(actionCtx, err)
+      }
+    }
+  }
+}
+
+/** Bring-to-front action, shared by the `front` result and the help list. */
+async function frontAction(ctx: Context): Promise<ExecuteResultAction> {
+  return {
+    Id: "bring-forward",
+    Name: await t(ctx, "action_front"),
+    IsDefault: true,
+    Action: async (actionCtx: Context) => {
+      try {
+        await bringForward()
+        await notify(actionCtx, await t(actionCtx, "notify_front"))
+      } catch (err) {
+        await notifyError(actionCtx, err)
+      }
+    }
+  }
+}
+
+/** "paste" result: create a note from the clipboard on Enter. */
+async function pasteResult(ctx: Context): Promise<Result> {
+  return {
+    Title: await t(ctx, "paste_title"),
+    SubTitle: await t(ctx, "paste_subtitle"),
+    Icon: appIcon,
+    Actions: [await pasteAction(ctx, await readTitleMode(ctx))]
+  }
+}
+
+/** "hideall" / "showall" result: one command that runs on Enter. */
+async function hideShowResult(ctx: Context, hiding: boolean): Promise<Result> {
+  return {
+    Title: hiding ? await t(ctx, "hideall_title") : await t(ctx, "showall_title"),
+    SubTitle: hiding ? await t(ctx, "hideall_subtitle") : await t(ctx, "showall_subtitle"),
+    Icon: appIcon,
+    Actions: [await hideShowAction(ctx, hiding)]
+  }
+}
+
+/** "front" result: raise every visible note above other windows. */
+async function frontResult(ctx: Context): Promise<Result> {
+  return {
+    Title: await t(ctx, "front_title"),
+    SubTitle: await t(ctx, "front_subtitle"),
+    Icon: appIcon,
+    Actions: [await frontAction(ctx)]
+  }
+}
+
+/** Default action for a command that runs immediately from the help list. */
+async function commandRunAction(ctx: Context, name: string): Promise<ExecuteResultAction | null> {
+  switch (name) {
+    case "paste":
+      return pasteAction(ctx, await readTitleMode(ctx))
+    case "hideall":
+      return hideShowAction(ctx, true)
+    case "showall":
+      return hideShowAction(ctx, false)
+    case "front":
+      return frontAction(ctx)
+    default:
+      return null
+  }
+}
+
+/**
+ * Blank-query help: one selectable row per declared command.
+ *
+ * Commands that need more input fill the query (`new `, `search `), commands
+ * with their own result view navigate to it (`list`, `ping`), and commands
+ * whose effect is the point execute immediately. When no concrete trigger
+ * keyword exists (a global-only "*" trigger), navigation is impossible, so
+ * those rows stay informational while runnable commands keep working.
+ */
+async function helpResults(ctx: Context, trigger: string | null): Promise<Result[]> {
+  const group = await t(ctx, "help_group_title")
+  const useCommand = await t(ctx, "action_use_command")
+  const aliasLabel = await t(ctx, "command_alias_tail")
+
+  return Promise.all(
+    COMMANDS.map(async spec => {
+      const actions: ResultAction[] = []
+      if (spec.kind === "run") {
+        const action = await commandRunAction(ctx, spec.name)
+        if (action) {
+          actions.push(action)
+        }
+      } else if (trigger) {
+        actions.push({
+          Id: "goto-" + spec.name,
+          Name: useCommand,
+          IsDefault: true,
+          PreventHideAfterAction: true,
+          Action: async (actionCtx: Context) => {
+            await api.ChangeQuery(actionCtx, { QueryType: "input", QueryText: trigger + " " + spec.suffix })
+          }
+        })
+      }
+
+      const tails: ResultTail[] = spec.aliases.map(alias => ({ Type: "text", Text: format(aliasLabel, alias) }))
+      return {
+        Id: "help-" + spec.name,
+        Title: await t(ctx, spec.usageKey),
+        SubTitle: await t(ctx, spec.descKey),
+        Icon: appIcon,
+        Group: group,
+        Tails: tails,
+        Actions: actions
+      }
+    })
+  )
+}
+
 export const plugin: Plugin = {
   init: async (ctx: Context, initParams: PluginInitParams) => {
     api = initParams.API
@@ -552,62 +719,14 @@ export const plugin: Plugin = {
     const trigger = await resolveTrigger(ctx, query)
     const triggerLabel = trigger || (await t(ctx, "trigger_keyword_generic"))
 
-    // Empty query — help, no Stickies call so it stays instant.
+    // Empty query — list every command without touching Stickies.
     if (!head) {
-      return [
-        {
-          Title: await t(ctx, "help_title"),
-          SubTitle: await t(ctx, "help_subtitle", triggerLabel),
-          Icon: appIcon,
-          Actions: trigger
-            ? [
-                {
-                  Id: "goto-list",
-                  Name: await t(ctx, "action_list"),
-                  IsDefault: true,
-                  PreventHideAfterAction: true,
-                  Action: async (actionCtx: Context) => {
-                    await api.ChangeQuery(actionCtx, { QueryType: "input", QueryText: trigger + " list" })
-                  }
-                }
-              ]
-            : []
-        },
-        {
-          Title: await t(ctx, "help_create_title"),
-          SubTitle: await t(ctx, "help_create_subtitle", triggerLabel),
-          Icon: appIcon,
-          Actions: trigger
-            ? [
-                {
-                  Id: "goto-create",
-                  Name: await t(ctx, "action_create"),
-                  PreventHideAfterAction: true,
-                  Action: async (actionCtx: Context) => {
-                    await api.ChangeQuery(actionCtx, { QueryType: "input", QueryText: trigger + " new " })
-                  }
-                }
-              ]
-            : []
-        }
-      ]
+      return helpResults(ctx, trigger)
     }
 
     // ping — check Stickies answers and report its version.
     if (head === "ping") {
-      try {
-        const version = await ping()
-        return [
-          {
-            Title: await t(ctx, "ping_title", version),
-            SubTitle: await t(ctx, "ping_subtitle"),
-            Icon: appIcon,
-            Actions: []
-          }
-        ]
-      } catch (err) {
-        return [await errorResult(ctx, err)]
-      }
+      return [await pingResult(ctx)]
     }
 
     // list / ls / search / s — desktop notes. Keywords filter the list, so
@@ -622,88 +741,17 @@ export const plugin: Plugin = {
 
     // paste — new note from the clipboard as plain text.
     if (head === "paste") {
-      const titleMode = await readTitleMode(ctx)
-      return [
-        {
-          Title: await t(ctx, "paste_title"),
-          SubTitle: await t(ctx, "paste_subtitle"),
-          Icon: appIcon,
-          Actions: [
-            {
-              Id: "create-paste",
-              Name: await t(ctx, "action_create"),
-              IsDefault: true,
-              Action: async (actionCtx: Context, actionContext: ActionContext) => {
-                try {
-                  const id = await createStickyFromClipboard(normalizeTitleMode(actionContext.ContextData?.titleMode))
-                  await notify(actionCtx, await t(actionCtx, "notify_created", id))
-                } catch (err) {
-                  await notifyError(actionCtx, err)
-                }
-              },
-              ContextData: { titleMode }
-            }
-          ]
-        }
-      ]
+      return [await pasteResult(ctx)]
     }
 
     // hideall / showall
     if (head === "hideall" || head === "showall") {
-      const hiding = head === "hideall"
-      return [
-        {
-          Title: hiding ? await t(ctx, "hideall_title") : await t(ctx, "showall_title"),
-          SubTitle: hiding ? await t(ctx, "hideall_subtitle") : await t(ctx, "showall_subtitle"),
-          Icon: appIcon,
-          Actions: [
-            {
-              Id: hiding ? "hide-all" : "show-all",
-              Name: hiding ? await t(ctx, "action_hideall") : await t(ctx, "action_showall"),
-              IsDefault: true,
-              Action: async (actionCtx: Context) => {
-                try {
-                  if (hiding) {
-                    await hideAll()
-                    await notify(actionCtx, await t(actionCtx, "notify_hideall"))
-                  } else {
-                    await showAll()
-                    await notify(actionCtx, await t(actionCtx, "notify_showall"))
-                  }
-                } catch (err) {
-                  await notifyError(actionCtx, err)
-                }
-              }
-            }
-          ]
-        }
-      ]
+      return [await hideShowResult(ctx, head === "hideall")]
     }
 
     // front / bring — raise every visible note above other windows.
     if (head === "front" || head === "bring") {
-      return [
-        {
-          Title: await t(ctx, "front_title"),
-          SubTitle: await t(ctx, "front_subtitle"),
-          Icon: appIcon,
-          Actions: [
-            {
-              Id: "bring-forward",
-              Name: await t(ctx, "action_front"),
-              IsDefault: true,
-              Action: async (actionCtx: Context) => {
-                try {
-                  await bringForward()
-                  await notify(actionCtx, await t(actionCtx, "notify_front"))
-                } catch (err) {
-                  await notifyError(actionCtx, err)
-                }
-              }
-            }
-          ]
-        }
-      ]
+      return [await frontResult(ctx)]
     }
 
     // new <text> — create a desktop note with this text.
