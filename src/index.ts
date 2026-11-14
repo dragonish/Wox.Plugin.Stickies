@@ -19,6 +19,7 @@ import {
   noteDefaultAction,
   ping,
   setHidden,
+  setOnTop,
   setRolled,
   showAll
 } from "./stickies"
@@ -183,10 +184,13 @@ interface NoteLabels {
   imagePreview: string
   tailRolled: string
   tailImage: string
+  tailOnTop: string
   untitled: string
   imageUntitled: string
   roll: string
   unroll: string
+  keepOnTop: string
+  stopOnTop: string
   focus: string
   copyText: string
   copyImage: string
@@ -206,10 +210,13 @@ async function loadNoteLabels(ctx: Context): Promise<NoteLabels> {
     imagePreview,
     tailRolled,
     tailImage,
+    tailOnTop,
     untitled,
     imageUntitled,
     roll,
     unroll,
+    keepOnTop,
+    stopOnTop,
     focus,
     copyText,
     copyImage,
@@ -226,10 +233,13 @@ async function loadNoteLabels(ctx: Context): Promise<NoteLabels> {
     t(ctx, "note_image_preview"),
     t(ctx, "note_tail_rolled"),
     t(ctx, "note_tail_image"),
+    t(ctx, "note_tail_ontop"),
     t(ctx, "note_untitled"),
     t(ctx, "note_image_untitled"),
     t(ctx, "action_roll"),
     t(ctx, "action_unroll"),
+    t(ctx, "action_ontop"),
+    t(ctx, "action_ontop_off"),
     t(ctx, "action_focus"),
     t(ctx, "action_copy_text"),
     t(ctx, "action_copy_image"),
@@ -247,10 +257,13 @@ async function loadNoteLabels(ctx: Context): Promise<NoteLabels> {
     imagePreview,
     tailRolled,
     tailImage,
+    tailOnTop,
     untitled,
     imageUntitled,
     roll,
     unroll,
+    keepOnTop,
+    stopOnTop,
     focus,
     copyText,
     copyImage,
@@ -418,6 +431,21 @@ function noteResult(note: StickyNote, labels: NoteLabels): Result {
       },
       ContextData: { id: note.id, rolled: note.rolled ? "1" : "0" }
     },
+    {
+      Id: "toggle-ontop",
+      Name: note.ontop ? labels.stopOnTop : labels.keepOnTop,
+      Action: async (actionCtx: Context, actionContext: ActionContext) => {
+        try {
+          const id = actionContext.ContextData.id
+          const wasOnTop = actionContext.ContextData.ontop === "1"
+          await setOnTop(id, !wasOnTop)
+          await notify(actionCtx, await t(actionCtx, wasOnTop ? "notify_ontop_off" : "notify_ontop"))
+        } catch (err) {
+          await notifyError(actionCtx, err)
+        }
+      },
+      ContextData: { id: note.id, ontop: note.ontop ? "1" : "0" }
+    },
     ...copyActions,
     {
       Id: "toggle-hide",
@@ -463,6 +491,9 @@ function noteResult(note: StickyNote, labels: NoteLabels): Result {
   }
   if (note.rolled) {
     tails.push({ Type: "text", Text: labels.tailRolled })
+  }
+  if (note.ontop) {
+    tails.push({ Type: "text", Text: labels.tailOnTop })
   }
 
   return {

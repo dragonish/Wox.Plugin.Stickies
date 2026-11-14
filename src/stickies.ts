@@ -32,6 +32,8 @@ export interface StickyNote {
   image: boolean
   rolled: boolean
   hidden: boolean
+  /** Always-on-top note (Stickies `ontop`). */
+  ontop: boolean
 }
 
 /** A note can be focused only while it is visible on the desktop and unrolled. */
@@ -363,8 +365,8 @@ export function matchNotes(notes: StickyNote[], query: string, imageTerms: strin
   })
 }
 
-/** Replies fetched per note by listNotes: utitle, utext, rolled, hidden, type. */
-const NOTE_REPLY_COUNT = 5
+/** Replies fetched per note by listNotes: utitle, utext, rolled, hidden, type, ontop. */
+const NOTE_REPLY_COUNT = 6
 
 /** Parse one batched listNotes reply group per id. Missing replies are skipped. */
 export function parseNoteReplies(ids: string[], replies: StickiesReply[]): StickyNote[] {
@@ -379,6 +381,7 @@ export function parseNoteReplies(ids: string[], replies: StickiesReply[]): Stick
     const rolledReply = replies[base + 2]
     const hiddenReply = replies[base + 3]
     const typeReply = replies[base + 4]
+    const ontopReply = replies[base + 5]
     const text = textReply.code === "001" ? decodeUnicode(textReply.text) : ""
     let title = titleReply.code === "001" ? decodeUnicode(titleReply.text) : ""
     if (!title) {
@@ -391,13 +394,14 @@ export function parseNoteReplies(ids: string[], replies: StickiesReply[]): Stick
       // "get desktop <id> type": 0 = RTF text note, 1 = image note.
       image: typeReply ? typeReply.code === "001" && typeReply.text.trim() === "1" : false,
       rolled: rolledReply ? rolledReply.text === "1" : false,
-      hidden: hiddenReply ? hiddenReply.text === "1" : false
+      hidden: hiddenReply ? hiddenReply.text === "1" : false,
+      ontop: ontopReply ? ontopReply.code === "001" && ontopReply.text.trim() === "1" : false
     })
   }
   return notes
 }
 
-/** List desktop notes with title, full text, image flag, rolled and hidden state. */
+/** List desktop notes with title, full text, image flag, rolled, hidden and ontop state. */
 export async function listNotes(): Promise<StickyNote[]> {
   const listReply = await runCommands(["api get list desktop"])
   throwIfError(listReply[0], "List notes")
@@ -412,6 +416,7 @@ export async function listNotes(): Promise<StickyNote[]> {
     commands.push("api get desktop " + id + " rolled")
     commands.push("api get desktop " + id + " hidden")
     commands.push("api get desktop " + id + " type")
+    commands.push("api get desktop " + id + " ontop")
   }
   const replies = await runCommands(commands)
   return parseNoteReplies(ids, replies)
@@ -420,6 +425,17 @@ export async function listNotes(): Promise<StickyNote[]> {
 export async function setRolled(id: string, rolled: boolean): Promise<void> {
   const replies = await runCommands(["api do desktop " + id + (rolled ? " rolled" : " unrolled")])
   throwIfError(replies[0], rolled ? "Roll up note" : "Unroll note")
+}
+
+/** "api set desktop <id> ontop 1" / "... ontop 0". */
+export function buildOnTopCommand(id: string, ontop: boolean): string {
+  return "api set desktop " + id + " ontop " + (ontop ? "1" : "0")
+}
+
+/** Keep a desktop note always-on-top, or let it drop back into the z-order. */
+export async function setOnTop(id: string, ontop: boolean): Promise<void> {
+  const replies = await runCommands([buildOnTopCommand(id, ontop)])
+  throwIfError(replies[0], ontop ? "Keep note on top" : "Remove note from top")
 }
 
 /**

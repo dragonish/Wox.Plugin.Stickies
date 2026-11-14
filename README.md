@@ -31,6 +31,8 @@ Bare text such as `sti buy milk` is no longer created implicitly; the plugin off
 
 For a note that is visible on the desktop and not rolled up, Enter now runs **Focus**: the note is brought to the front and receives keyboard focus. Hidden notes default to **Show** and rolled notes to **Unroll**, so Enter always moves a note one step towards open: hidden → shown → unrolled → focused. Image notes offer **Copy image** instead of **Copy text**; it replaces the clipboard with the note bitmap.
 
+Each note also offers **Keep on top** / **Stop keeping on top**, which toggles the Stickies always-on-top flag. Notes that are kept on top show an `on top` tag in the list.
+
 ## Settings
 
 | Setting            | Values                                                               | Default                 |
