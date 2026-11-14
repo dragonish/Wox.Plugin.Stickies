@@ -4,6 +4,7 @@ import {
   MAX_TEXT_LENGTH,
   StickiesError,
   StickyNote,
+  StickyStack,
   TitleMode,
   bringForward,
   canFocusNote,
@@ -16,13 +17,16 @@ import {
   focusNote,
   hideAll,
   listNotes,
+  listStacks,
   matchNotes,
+  matchStacks,
   normalizeTitleMode,
   noteDefaultAction,
   ping,
   setGhost,
   setHidden,
   setOnTop,
+  setStackState,
   setRolled,
   showAll
 } from "./stickies"
@@ -287,6 +291,19 @@ async function loadNoteLabels(ctx: Context): Promise<NoteLabels> {
     closeNote,
     deleteNote
   }
+}
+
+/** Labels a stack row needs. Loaded once per stacks query. */
+interface StackLabels {
+  untitled: string
+  toggle: string
+  stack: string
+  unstack: string
+}
+
+async function loadStackLabels(ctx: Context): Promise<StackLabels> {
+  const [untitled, toggle, stack, unstack] = await Promise.all([t(ctx, "stack_untitled"), t(ctx, "action_stack_toggle"), t(ctx, "action_stack_stacked"), t(ctx, "action_stack_unstacked")])
+  return { untitled, toggle, stack, unstack }
 }
 
 /** List every desktop note, caching each row's text for its copy action. */
@@ -708,6 +725,99 @@ async function helpResults(ctx: Context, trigger: string | null): Promise<Result
   )
 }
 
+/** List stacks, or filter them by title keyword. */
+async function stackResults(ctx: Context, keyword: string): Promise<Result[]> {
+  try {
+    const stacks = await listStacks()
+    if (stacks.length === 0) {
+      return [
+        {
+          Title: await t(ctx, "stacks_empty_title"),
+          SubTitle: await t(ctx, "stacks_empty_subtitle"),
+          Icon: appIcon,
+          Actions: []
+        }
+      ]
+    }
+    const hits = matchStacks(stacks, keyword)
+    if (hits.length === 0) {
+      return [
+        {
+          Title: await t(ctx, "stacks_search_empty_title", keyword),
+          SubTitle: await t(ctx, "stacks_search_empty_subtitle"),
+          Icon: appIcon,
+          Actions: []
+        }
+      ]
+    }
+    const labels = await loadStackLabels(ctx)
+    return hits.map(stack => stackResult(stack, labels))
+  } catch (err) {
+    return [await errorResult(ctx, err)]
+  }
+}
+
+function stackResult(stack: StickyStack, labels: StackLabels): Result {
+  const meta: string[] = ["ID " + stack.id]
+  if (stack.position) {
+    meta.push(stack.position.x + "," + stack.position.y)
+  }
+  if (stack.size) {
+    meta.push(stack.size.width + "x" + stack.size.height)
+  }
+  return {
+    Title: stack.title || labels.untitled,
+    SubTitle: meta.join(" · "),
+    Icon: appIcon,
+    Actions: [
+      {
+        Id: "toggle-stack",
+        Name: labels.toggle,
+        IsDefault: true,
+        Action: async (actionCtx: Context, actionContext: ActionContext) => {
+          try {
+            const state = await setStackState(actionContext.ContextData.id, "toggle")
+            if (state === "stacked") {
+              await notify(actionCtx, await t(actionCtx, "notify_stack_stacked"))
+            } else {
+              await notify(actionCtx, await t(actionCtx, "notify_stack_unstacked"))
+            }
+          } catch (err) {
+            await notifyError(actionCtx, err)
+          }
+        },
+        ContextData: { id: stack.id }
+      },
+      {
+        Id: "stack-notes",
+        Name: labels.stack,
+        Action: async (actionCtx: Context, actionContext: ActionContext) => {
+          try {
+            await setStackState(actionContext.ContextData.id, "stacked")
+            await notify(actionCtx, await t(actionCtx, "notify_stack_stacked"))
+          } catch (err) {
+            await notifyError(actionCtx, err)
+          }
+        },
+        ContextData: { id: stack.id }
+      },
+      {
+        Id: "unstack-notes",
+        Name: labels.unstack,
+        Action: async (actionCtx: Context, actionContext: ActionContext) => {
+          try {
+            await setStackState(actionContext.ContextData.id, "unstacked")
+            await notify(actionCtx, await t(actionCtx, "notify_stack_unstacked"))
+          } catch (err) {
+            await notifyError(actionCtx, err)
+          }
+        },
+        ContextData: { id: stack.id }
+      }
+    ]
+  }
+}
+
 export const plugin: Plugin = {
   init: async (ctx: Context, initParams: PluginInitParams) => {
     api = initParams.API
@@ -752,6 +862,11 @@ export const plugin: Plugin = {
     // front / bring — raise every visible note above other windows.
     if (head === "front" || head === "bring") {
       return [await frontResult(ctx)]
+    }
+
+    // stacks / stack — list stacks, optionally filtered by title keyword.
+    if (head === "stacks" || head === "stack") {
+      return stackResults(ctx, args)
     }
 
     // new <text> — create a desktop note with this text.

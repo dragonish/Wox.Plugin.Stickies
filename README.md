@@ -24,9 +24,12 @@ Typing just the trigger keyword lists every command. Enter fills `new` / `search
 | `sti paste`                                | Create a note from the clipboard as plain text |
 | `sti hideall` / `sti showall`              | Hide or show all desktop notes                 |
 | `sti front` / `sti bring`                  | Bring all visible notes to the front           |
+| `sti stacks` / `sti stack`                 | List stacks, or filter them by title           |
 | `sti ping`                                 | Check that Stickies is running                 |
 
 `sti front` raises every visible note above other windows, the same as clicking the Stickies tray icon; hidden notes stay hidden. Use `sti showall` first if you also want hidden notes back.
+
+`sti stacks` lists every stack with its id, screen position and size. Enter toggles the stack: collapsed notes are spread onto the desktop, and spread notes are collapsed back into the stack. Each row also has explicit **Collapse notes into the stack** and **Spread notes onto the desktop** actions, and a keyword after `stacks` filters the list by stack title. The Stickies API cannot create, rename or delete stacks, and it does not expose which notes belong to a stack or whether it is currently collapsed.
 
 Search splits the keywords on spaces and requires every keyword to appear in the note title or body, so `sti list milk todo` finds notes containing both words. Matching is case-insensitive.
 

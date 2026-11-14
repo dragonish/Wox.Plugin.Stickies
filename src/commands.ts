@@ -85,6 +85,14 @@ export const COMMANDS: CommandSpec[] = [
     suffix: ""
   },
   {
+    name: "stacks",
+    aliases: ["stack"],
+    usageKey: "command_stacks_usage",
+    descKey: "command_stacks_desc",
+    kind: "navigate",
+    suffix: "stacks"
+  },
+  {
     name: "ping",
     aliases: [],
     usageKey: "command_ping_usage",

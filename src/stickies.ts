@@ -78,6 +78,8 @@ export const ERR_BRIDGE = "ERR_BRIDGE"
 export const MAX_TEXT_LENGTH = 4000
 /** Maximum notes returned by one list query. */
 export const MAX_LIST_NOTES = 30
+/** Maximum stacks returned by one list query. */
+export const MAX_LIST_STACKS = 30
 /** Maximum title length the plugin derives from the note body. */
 export const MAX_TITLE_LENGTH = 80
 
@@ -425,6 +427,111 @@ export async function listNotes(): Promise<StickyNote[]> {
   }
   const replies = await runCommands(commands)
   return parseNoteReplies(ids, replies)
+}
+
+/** A Stickies stack. Stack ids are integers and do not collide with note ids. */
+export interface StickyStack {
+  id: string
+  title: string
+  /** Screen position, null when the API did not report it. */
+  position: { x: number; y: number } | null
+  /** Window size, null when the API did not report it. */
+  size: { width: number; height: number } | null
+}
+
+export type StackState = "stacked" | "unstacked"
+
+/** Parse "get stack <id> position": "3294,552" -> { x, y }. */
+export function parseStackPosition(text: string): { x: number; y: number } | null {
+  const match = /^(-?\d+)\s*,\s*(-?\d+)$/.exec((text || "").trim())
+  return match ? { x: Number(match[1]), y: Number(match[2]) } : null
+}
+
+/** Parse "get stack <id> size": "406x100" -> { width, height }. */
+export function parseStackSize(text: string): { width: number; height: number } | null {
+  const match = /^(\d+)\s*[xX]\s*(\d+)$/.exec((text || "").trim())
+  return match ? { width: Number(match[1]), height: Number(match[2]) } : null
+}
+
+/** Replies fetched per stack by listStacks: utitle, position, size. */
+const STACK_REPLY_COUNT = 3
+
+/** Parse one batched listStacks reply group per id. Missing replies are skipped. */
+export function parseStackReplies(ids: string[], replies: StickiesReply[]): StickyStack[] {
+  const stacks: StickyStack[] = []
+  for (let i = 0; i < ids.length; i++) {
+    const base = i * STACK_REPLY_COUNT
+    const titleReply = replies[base]
+    if (!titleReply) {
+      continue
+    }
+    const positionReply = replies[base + 1]
+    const sizeReply = replies[base + 2]
+    stacks.push({
+      id: ids[i],
+      title: titleReply.code === "001" ? decodeUnicode(titleReply.text) : "",
+      position: positionReply && positionReply.code === "001" ? parseStackPosition(positionReply.text) : null,
+      size: sizeReply && sizeReply.code === "001" ? parseStackSize(sizeReply.text) : null
+    })
+  }
+  return stacks
+}
+
+/**
+ * Filter stacks by a whitespace-separated keyword query: every keyword must
+ * appear in the stack title (AND), case-insensitive. Stack ids are not searched.
+ */
+export function matchStacks(stacks: StickyStack[], query: string): StickyStack[] {
+  const keywords = query
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(keyword => keyword.length > 0)
+  if (keywords.length === 0) {
+    return stacks
+  }
+  return stacks.filter(stack => {
+    const title = stack.title.toLowerCase()
+    return keywords.every(keyword => title.indexOf(keyword) >= 0)
+  })
+}
+
+/** List stacks with title, screen position and size. */
+export async function listStacks(): Promise<StickyStack[]> {
+  const listReply = await runCommands(["api get list stacks"])
+  throwIfError(listReply[0], "List stacks")
+  const ids = parseIdList(listReply[0]).slice(0, MAX_LIST_STACKS)
+  if (ids.length === 0) {
+    return []
+  }
+  const commands: string[] = []
+  for (const id of ids) {
+    commands.push("api get stack " + id + " utitle")
+    commands.push("api get stack " + id + " position")
+    commands.push("api get stack " + id + " size")
+  }
+  return parseStackReplies(ids, await runCommands(commands))
+}
+
+/** "api do stack <id> stacked|unstacked|togglestacked". */
+export function buildStackStateCommand(id: string, state: StackState | "toggle"): string {
+  const verb = state === "toggle" ? "togglestacked" : state
+  return "api do stack " + id + " " + verb
+}
+
+/** togglestacked replies "000 OK stacked" or "000 OK unstacked". */
+export function stackStateFromReply(reply: StickiesReply): StackState {
+  const text = (reply.text || "")
+    .replace(/^OK\s+/i, "")
+    .trim()
+    .toLowerCase()
+  return text === "unstacked" ? "unstacked" : "stacked"
+}
+
+/** Collapse the stack's notes into it, spread them out, or toggle between both. */
+export async function setStackState(id: string, state: StackState | "toggle"): Promise<StackState> {
+  const replies = await runCommands([buildStackStateCommand(id, state)])
+  throwIfError(replies[0], "Change stack state")
+  return stackStateFromReply(replies[0])
 }
 
 export async function setRolled(id: string, rolled: boolean): Promise<void> {

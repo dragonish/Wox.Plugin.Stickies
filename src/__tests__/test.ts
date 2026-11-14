@@ -6,6 +6,7 @@ import { COMMANDS } from "../commands"
 import {
   buildGhostCommand,
   buildOnTopCommand,
+  buildStackStateCommand,
   buildTitleCommands,
   canFocusNote,
   contentTitle,
@@ -13,13 +14,18 @@ import {
   encodeUnicode,
   formatCreatedTitle,
   matchNotes,
+  matchStacks,
   normalizeBridgeOutput,
   normalizeTitleMode,
   noteDefaultAction,
   parseCreatedId,
   parseIdList,
   parseNoteReplies,
-  parseReply
+  parseReply,
+  parseStackPosition,
+  parseStackReplies,
+  parseStackSize,
+  stackStateFromReply
 } from "../stickies"
 
 const DEFAULT_TRIGGER = "sti"
@@ -328,6 +334,83 @@ describe("batched note reply parsing", () => {
   })
 })
 
+describe("stack geometry parsing", () => {
+  test("parses screen positions, including negative coordinates", () => {
+    expect(parseStackPosition("3294,552")).toEqual({ x: 3294, y: 552 })
+    expect(parseStackPosition(" -100 , 20 ")).toEqual({ x: -100, y: 20 })
+    expect(parseStackPosition("")).toBeNull()
+    expect(parseStackPosition("garbage")).toBeNull()
+    expect(parseStackPosition("10")).toBeNull()
+  })
+
+  test("parses sizes written as WxH", () => {
+    expect(parseStackSize("406x100")).toEqual({ width: 406, height: 100 })
+    expect(parseStackSize("406X100")).toEqual({ width: 406, height: 100 })
+    expect(parseStackSize(" 20 x 10 ")).toEqual({ width: 20, height: 10 })
+    expect(parseStackSize("")).toBeNull()
+    expect(parseStackSize("406*100")).toBeNull()
+  })
+})
+
+describe("stack keyword matching", () => {
+  const stacks = [
+    { id: "6", title: "歌曲", position: null, size: null },
+    { id: "12", title: "Project Alpha", position: null, size: null },
+    { id: "13", title: "alpha notes", position: null, size: null }
+  ]
+  const ids = (list: Array<{ id: string }>): string[] => list.map(stack => stack.id)
+
+  test("matches titles case-insensitively and requires every keyword", () => {
+    expect(ids(matchStacks(stacks, "alpha"))).toEqual(["12", "13"])
+    expect(ids(matchStacks(stacks, "ALPHA NOTES"))).toEqual(["13"])
+    expect(ids(matchStacks(stacks, "alpha beta"))).toEqual([])
+    expect(ids(matchStacks(stacks, "歌曲"))).toEqual(["6"])
+  })
+
+  test("does not search stack ids", () => {
+    expect(ids(matchStacks(stacks, "12"))).toEqual([])
+  })
+
+  test("blank queries return every stack", () => {
+    expect(ids(matchStacks(stacks, ""))).toEqual(["6", "12", "13"])
+    expect(ids(matchStacks(stacks, " \u3000 "))).toEqual(["6", "12", "13"])
+  })
+})
+
+describe("batched stack reply parsing", () => {
+  const reply = (code: string, text = "") => ({ code, text, raw: code + (text ? " " + text : "") })
+  const group = (title: string, position: string, size: string) => [reply("001", title), reply("001", position), reply("001", size)]
+
+  test("reads title, position and size for every stack", () => {
+    const replies = [...group(encodeUnicode("歌曲"), "3294,552", "406x100"), ...group("", "-10,20", "200x50")]
+    expect(parseStackReplies(["6", "7"], replies)).toEqual([
+      { id: "6", title: "歌曲", position: { x: 3294, y: 552 }, size: { width: 406, height: 100 } },
+      { id: "7", title: "", position: { x: -10, y: 20 }, size: { width: 200, height: 50 } }
+    ])
+  })
+
+  test("keeps rows with missing or failed metadata and skips missing titles", () => {
+    const partial = parseStackReplies(["6"], [reply("001", encodeUnicode("歌曲")), reply("998", "sticky not found"), reply("001", "bad size")])
+    expect(partial).toEqual([{ id: "6", title: "歌曲", position: null, size: null }])
+
+    expect(parseStackReplies(["6"], []).length).toBe(0)
+  })
+})
+
+describe("stack state commands", () => {
+  test("builds stacked, unstacked and toggle commands", () => {
+    expect(buildStackStateCommand("6", "stacked")).toBe("api do stack 6 stacked")
+    expect(buildStackStateCommand("6", "unstacked")).toBe("api do stack 6 unstacked")
+    expect(buildStackStateCommand("6", "toggle")).toBe("api do stack 6 togglestacked")
+  })
+
+  test("reads the resulting state from the reply without matching 'stacked' in 'unstacked'", () => {
+    expect(stackStateFromReply({ code: "000", text: "OK stacked", raw: "000 OK stacked" })).toBe("stacked")
+    expect(stackStateFromReply({ code: "000", text: "OK unstacked", raw: "000 OK unstacked" })).toBe("unstacked")
+    expect(stackStateFromReply({ code: "000", text: "", raw: "000" })).toBe("stacked")
+  })
+})
+
 describe("bridge output normalization", () => {
   test("accepts a lone object, an array and the doubly nested legacy shape", () => {
     const one = { code: "000", text: "OK pong", raw: "000 OK pong" }
@@ -423,6 +506,8 @@ describe("plugin query routing (no Stickies needed)", () => {
     expect(search.Tails).toEqual([{ Type: "text", Text: formatTranslation(enTranslations.command_alias_tail, "s") }])
     const front = helpRow(results, "front")
     expect(front.Tails).toEqual([{ Type: "text", Text: formatTranslation(enTranslations.command_alias_tail, "bring") }])
+    const stacks = helpRow(results, "stacks")
+    expect(stacks.Tails).toEqual([{ Type: "text", Text: formatTranslation(enTranslations.command_alias_tail, "stack") }])
   })
 
   test("commands that need input fill the query and keep Wox open", async () => {
@@ -601,6 +686,19 @@ describe("plugin query routing (no Stickies needed)", () => {
     expect(results[0].Actions?.[0].Id).toBe("bring-forward")
   })
 
+  test("stacks off Windows returns a readable error result", async () => {
+    const originalPlatform = process.platform
+    Object.defineProperty(process, "platform", { value: "linux", configurable: true })
+    try {
+      const results = await queryResults(ctx, "stacks")
+      expect(results.length).toBe(1)
+      expect(results[0].SubTitle).toBe(enTranslations.error_hint_windows_only)
+      expect(results[0].Actions?.[0].Id).toBe("copy-error")
+    } finally {
+      Object.defineProperty(process, "platform", { value: originalPlatform, configurable: true })
+    }
+  })
+
   test("ping off Windows returns a readable error result, not a throw", async () => {
     const originalPlatform = process.platform
     Object.defineProperty(process, "platform", { value: "linux", configurable: true })
@@ -655,7 +753,7 @@ describe("plugin metadata i18n", () => {
 
   test("declares every command in plugin.json with translated descriptions", () => {
     const commands = pluginJson.Commands as Array<{ Command: string; Description: string; Aliases?: string[] }>
-    expect(commands.map(command => command.Command)).toEqual(["new", "list", "search", "paste", "hideall", "showall", "front", "ping"])
+    expect(commands.map(command => command.Command)).toEqual(["new", "list", "search", "paste", "hideall", "showall", "front", "stacks", "ping"])
 
     for (const command of commands) {
       expect(command.Description.startsWith("i18n:")).toBe(true)
@@ -668,6 +766,7 @@ describe("plugin metadata i18n", () => {
     expect(byName.get("list")?.Aliases).toContain("ls")
     expect(byName.get("search")?.Aliases).toContain("s")
     expect(byName.get("front")?.Aliases).toContain("bring")
+    expect(byName.get("stacks")?.Aliases).toContain("stack")
   })
 
   test("the help command table mirrors plugin.json and has translated labels", () => {
