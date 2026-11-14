@@ -18,6 +18,7 @@ import {
   normalizeTitleMode,
   noteDefaultAction,
   ping,
+  setGhost,
   setHidden,
   setOnTop,
   setRolled,
@@ -185,12 +186,15 @@ interface NoteLabels {
   tailRolled: string
   tailImage: string
   tailOnTop: string
+  tailGhost: string
   untitled: string
   imageUntitled: string
   roll: string
   unroll: string
   keepOnTop: string
   stopOnTop: string
+  keepClickThrough: string
+  stopClickThrough: string
   focus: string
   copyText: string
   copyImage: string
@@ -211,12 +215,15 @@ async function loadNoteLabels(ctx: Context): Promise<NoteLabels> {
     tailRolled,
     tailImage,
     tailOnTop,
+    tailGhost,
     untitled,
     imageUntitled,
     roll,
     unroll,
     keepOnTop,
     stopOnTop,
+    keepClickThrough,
+    stopClickThrough,
     focus,
     copyText,
     copyImage,
@@ -234,12 +241,15 @@ async function loadNoteLabels(ctx: Context): Promise<NoteLabels> {
     t(ctx, "note_tail_rolled"),
     t(ctx, "note_tail_image"),
     t(ctx, "note_tail_ontop"),
+    t(ctx, "note_tail_ghost"),
     t(ctx, "note_untitled"),
     t(ctx, "note_image_untitled"),
     t(ctx, "action_roll"),
     t(ctx, "action_unroll"),
     t(ctx, "action_ontop"),
     t(ctx, "action_ontop_off"),
+    t(ctx, "action_ghost"),
+    t(ctx, "action_ghost_off"),
     t(ctx, "action_focus"),
     t(ctx, "action_copy_text"),
     t(ctx, "action_copy_image"),
@@ -258,12 +268,15 @@ async function loadNoteLabels(ctx: Context): Promise<NoteLabels> {
     tailRolled,
     tailImage,
     tailOnTop,
+    tailGhost,
     untitled,
     imageUntitled,
     roll,
     unroll,
     keepOnTop,
     stopOnTop,
+    keepClickThrough,
+    stopClickThrough,
     focus,
     copyText,
     copyImage,
@@ -446,6 +459,21 @@ function noteResult(note: StickyNote, labels: NoteLabels): Result {
       },
       ContextData: { id: note.id, ontop: note.ontop ? "1" : "0" }
     },
+    {
+      Id: "toggle-ghost",
+      Name: note.ghost ? labels.stopClickThrough : labels.keepClickThrough,
+      Action: async (actionCtx: Context, actionContext: ActionContext) => {
+        try {
+          const id = actionContext.ContextData.id
+          const wasGhost = actionContext.ContextData.ghost === "1"
+          await setGhost(id, !wasGhost)
+          await notify(actionCtx, await t(actionCtx, wasGhost ? "notify_ghost_off" : "notify_ghost"))
+        } catch (err) {
+          await notifyError(actionCtx, err)
+        }
+      },
+      ContextData: { id: note.id, ghost: note.ghost ? "1" : "0" }
+    },
     ...copyActions,
     {
       Id: "toggle-hide",
@@ -494,6 +522,9 @@ function noteResult(note: StickyNote, labels: NoteLabels): Result {
   }
   if (note.ontop) {
     tails.push({ Type: "text", Text: labels.tailOnTop })
+  }
+  if (note.ghost) {
+    tails.push({ Type: "text", Text: labels.tailGhost })
   }
 
   return {

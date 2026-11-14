@@ -33,6 +33,8 @@ For a note that is visible on the desktop and not rolled up, Enter now runs **Fo
 
 Each note also offers **Keep on top** / **Stop keeping on top**, which toggles the Stickies always-on-top flag. Notes that are kept on top show an `on top` tag in the list.
 
+**Enable click-through** / **Disable click-through** toggles Stickies ghost mode: the note stays visible but lets mouse clicks pass through to whatever is underneath. Such notes are tagged `click-through` and can still be activated from Wox with Focus, which is the easy way to turn the mode back off.
+
 ## Settings
 
 | Setting            | Values                                                               | Default                 |

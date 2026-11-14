@@ -34,6 +34,8 @@ export interface StickyNote {
   hidden: boolean
   /** Always-on-top note (Stickies `ontop`). */
   ontop: boolean
+  /** Click-through note (Stickies `ghost`): visible, but ignores the mouse. */
+  ghost: boolean
 }
 
 /** A note can be focused only while it is visible on the desktop and unrolled. */
@@ -365,8 +367,8 @@ export function matchNotes(notes: StickyNote[], query: string, imageTerms: strin
   })
 }
 
-/** Replies fetched per note by listNotes: utitle, utext, rolled, hidden, type, ontop. */
-const NOTE_REPLY_COUNT = 6
+/** Replies fetched per note by listNotes: utitle, utext, rolled, hidden, type, ontop, ghost. */
+const NOTE_REPLY_COUNT = 7
 
 /** Parse one batched listNotes reply group per id. Missing replies are skipped. */
 export function parseNoteReplies(ids: string[], replies: StickiesReply[]): StickyNote[] {
@@ -382,6 +384,7 @@ export function parseNoteReplies(ids: string[], replies: StickiesReply[]): Stick
     const hiddenReply = replies[base + 3]
     const typeReply = replies[base + 4]
     const ontopReply = replies[base + 5]
+    const ghostReply = replies[base + 6]
     const text = textReply.code === "001" ? decodeUnicode(textReply.text) : ""
     let title = titleReply.code === "001" ? decodeUnicode(titleReply.text) : ""
     if (!title) {
@@ -395,13 +398,14 @@ export function parseNoteReplies(ids: string[], replies: StickiesReply[]): Stick
       image: typeReply ? typeReply.code === "001" && typeReply.text.trim() === "1" : false,
       rolled: rolledReply ? rolledReply.text === "1" : false,
       hidden: hiddenReply ? hiddenReply.text === "1" : false,
-      ontop: ontopReply ? ontopReply.code === "001" && ontopReply.text.trim() === "1" : false
+      ontop: ontopReply ? ontopReply.code === "001" && ontopReply.text.trim() === "1" : false,
+      ghost: ghostReply ? ghostReply.code === "001" && ghostReply.text.trim() === "1" : false
     })
   }
   return notes
 }
 
-/** List desktop notes with title, full text, image flag, rolled, hidden and ontop state. */
+/** List desktop notes with title, full text, image flag, rolled, hidden, ontop and ghost state. */
 export async function listNotes(): Promise<StickyNote[]> {
   const listReply = await runCommands(["api get list desktop"])
   throwIfError(listReply[0], "List notes")
@@ -417,6 +421,7 @@ export async function listNotes(): Promise<StickyNote[]> {
     commands.push("api get desktop " + id + " hidden")
     commands.push("api get desktop " + id + " type")
     commands.push("api get desktop " + id + " ontop")
+    commands.push("api get desktop " + id + " ghost")
   }
   const replies = await runCommands(commands)
   return parseNoteReplies(ids, replies)
@@ -436,6 +441,17 @@ export function buildOnTopCommand(id: string, ontop: boolean): string {
 export async function setOnTop(id: string, ontop: boolean): Promise<void> {
   const replies = await runCommands([buildOnTopCommand(id, ontop)])
   throwIfError(replies[0], ontop ? "Keep note on top" : "Remove note from top")
+}
+
+/** "api set desktop <id> ghost 1" / "... ghost 0". */
+export function buildGhostCommand(id: string, ghost: boolean): string {
+  return "api set desktop " + id + " ghost " + (ghost ? "1" : "0")
+}
+
+/** Make a desktop note click-through, or give it back its mouse input. */
+export async function setGhost(id: string, ghost: boolean): Promise<void> {
+  const replies = await runCommands([buildGhostCommand(id, ghost)])
+  throwIfError(replies[0], ghost ? "Enable click-through" : "Disable click-through")
 }
 
 /**

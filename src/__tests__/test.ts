@@ -3,6 +3,7 @@ import * as path from "node:path"
 import { ActionContext, Context, PublicAPI, Query, Result, WoxImage } from "@wox-launcher/wox-plugin"
 import { noteListMode, parseQuery, plugin } from "../index"
 import {
+  buildGhostCommand,
   buildOnTopCommand,
   buildTitleCommands,
   canFocusNote,
@@ -134,7 +135,7 @@ describe("new note title modes", () => {
 })
 
 describe("note focus eligibility", () => {
-  const note = { id: "abc", title: "t", text: "body", image: false, rolled: false, hidden: false, ontop: false }
+  const note = { id: "abc", title: "t", text: "body", image: false, rolled: false, hidden: false, ontop: false, ghost: false }
 
   test("offers focus only for visible, unrolled desktop notes", () => {
     expect(canFocusNote(note)).toBe(true)
@@ -145,7 +146,7 @@ describe("note focus eligibility", () => {
 })
 
 describe("note default action", () => {
-  const note = { id: "abc", title: "t", text: "body", image: false, rolled: false, hidden: false, ontop: false }
+  const note = { id: "abc", title: "t", text: "body", image: false, rolled: false, hidden: false, ontop: false, ghost: false }
 
   test("reveals a hidden note before anything else", () => {
     expect(noteDefaultAction({ ...note, hidden: true })).toBe("show")
@@ -160,10 +161,10 @@ describe("note default action", () => {
 
 describe("note keyword matching", () => {
   const notes = [
-    { id: "n1", title: "Groceries", text: "buy milk and bread", image: false, rolled: false, hidden: false, ontop: false },
-    { id: "n2", title: "", text: "牛奶 待办 买面包", image: false, rolled: false, hidden: false, ontop: false },
-    { id: "n3", title: "milk", text: "already bought", image: false, rolled: false, hidden: false, ontop: false },
-    { id: "n4", title: "Price list", text: "cost 2.5 (usd)", image: false, rolled: false, hidden: false, ontop: false }
+    { id: "n1", title: "Groceries", text: "buy milk and bread", image: false, rolled: false, hidden: false, ontop: false, ghost: false },
+    { id: "n2", title: "", text: "牛奶 待办 买面包", image: false, rolled: false, hidden: false, ontop: false, ghost: false },
+    { id: "n3", title: "milk", text: "already bought", image: false, rolled: false, hidden: false, ontop: false, ghost: false },
+    { id: "n4", title: "Price list", text: "cost 2.5 (usd)", image: false, rolled: false, hidden: false, ontop: false, ghost: false }
   ]
   const ids = (list: Array<{ id: string }>): string[] => list.map(note => note.id)
 
@@ -197,7 +198,7 @@ describe("note keyword matching", () => {
   })
 
   test("matches image notes through localized image terms", () => {
-    const withImages = [...notes, { id: "img", title: "", text: "", image: true, rolled: false, hidden: false, ontop: false }]
+    const withImages = [...notes, { id: "img", title: "", text: "", image: true, rolled: false, hidden: false, ontop: false, ghost: false }]
     expect(ids(matchNotes(withImages, "图片"))).toEqual([])
     expect(ids(matchNotes(withImages, "图片", ["图片", "image"]))).toEqual(["img"])
     expect(ids(matchNotes(withImages, "IMAGE", ["图片", "image"]))).toEqual(["img"])
@@ -207,7 +208,7 @@ describe("note keyword matching", () => {
   })
 
   test("image note titles and bodies still match normally", () => {
-    const imageWithText = { id: "img", title: "截图", text: "image of a chart", image: true, rolled: false, hidden: false, ontop: false }
+    const imageWithText = { id: "img", title: "截图", text: "image of a chart", image: true, rolled: false, hidden: false, ontop: false, ghost: false }
     expect(ids(matchNotes([imageWithText], "截图"))).toEqual(["img"])
     expect(ids(matchNotes([imageWithText], "chart"))).toEqual(["img"])
   })
@@ -261,24 +262,32 @@ describe("note on-top command", () => {
   })
 })
 
+describe("note click-through command", () => {
+  test("sets and clears the ghost flag", () => {
+    expect(buildGhostCommand("abc", true)).toBe("api set desktop abc ghost 1")
+    expect(buildGhostCommand("abc", false)).toBe("api set desktop abc ghost 0")
+  })
+})
+
 describe("batched note reply parsing", () => {
   const reply = (code: string, text = "") => ({ code, text, raw: code + (text ? " " + text : "") })
-  const group = (title: string, text: string, rolled: string, hidden: string, type: string, ontop = "0") => [
+  const group = (title: string, text: string, rolled: string, hidden: string, type: string, ontop = "0", ghost = "0") => [
     reply("001", title),
     reply("001", text),
     reply("001", rolled),
     reply("001", hidden),
     reply("001", type),
-    reply("001", ontop)
+    reply("001", ontop),
+    reply("001", ghost)
   ]
 
-  test("reads title, text, image, rolled, hidden and ontop for every id", () => {
-    const replies = [...group(encodeUnicode("Title A"), encodeUnicode("Body A"), "0", "1", "0", "1"), ...group("", "", "1", "0", "1")]
+  test("reads title, text, image, rolled, hidden, ontop and ghost for every id", () => {
+    const replies = [...group(encodeUnicode("Title A"), encodeUnicode("Body A"), "0", "1", "0", "1", "0"), ...group("", "", "1", "0", "1", "0", "1")]
     const notes = parseNoteReplies(["a", "b"], replies)
 
     expect(notes).toEqual([
-      { id: "a", title: "Title A", text: "Body A", image: false, rolled: false, hidden: true, ontop: true },
-      { id: "b", title: "", text: "", image: true, rolled: true, hidden: false, ontop: false }
+      { id: "a", title: "Title A", text: "Body A", image: false, rolled: false, hidden: true, ontop: true, ghost: false },
+      { id: "b", title: "", text: "", image: true, rolled: true, hidden: false, ontop: false, ghost: true }
     ])
   })
 
@@ -288,6 +297,14 @@ describe("batched note reply parsing", () => {
 
     const failed = parseNoteReplies(["a"], [...group("", "", "0", "0", "0").slice(0, 5), reply("998", "sticky not found")])
     expect(failed[0].ontop).toBe(false)
+  })
+
+  test("treats a missing or failed ghost reply as not click-through", () => {
+    const missing = parseNoteReplies(["a"], group("", "", "0", "0", "0").slice(0, 6))
+    expect(missing[0].ghost).toBe(false)
+
+    const failed = parseNoteReplies(["a"], [...group("", "", "0", "0", "0").slice(0, 6), reply("998", "sticky not found")])
+    expect(failed[0].ghost).toBe(false)
   })
 
   test("falls back to the first body line when the title is empty", () => {
