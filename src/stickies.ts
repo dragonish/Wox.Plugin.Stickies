@@ -489,6 +489,12 @@ export async function deleteNote(id: string): Promise<void> {
   throwIfError(replies[0], "Delete note")
 }
 
+/** Bring every visible desktop note above other windows (same as clicking the tray icon). */
+export async function bringForward(): Promise<void> {
+  const replies = await runCommands(["api do bringforward"])
+  throwIfError(replies[0], "Bring notes to the front")
+}
+
 export async function hideAll(): Promise<void> {
   const replies = await runCommands(["api do hideall"])
   throwIfError(replies[0], "Hide all notes")

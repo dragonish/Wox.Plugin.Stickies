@@ -21,7 +21,10 @@ Type the trigger keyword (`sti` by default), then a command:
 | `sti search <keyword>` / `sti s <keyword>` | Search note titles and bodies                  |
 | `sti paste`                                | Create a note from the clipboard as plain text |
 | `sti hideall` / `sti showall`              | Hide or show all desktop notes                 |
+| `sti front` / `sti bring`                  | Bring all visible notes to the front           |
 | `sti ping`                                 | Check that Stickies is running                 |
+
+`sti front` raises every visible note above other windows, the same as clicking the Stickies tray icon; hidden notes stay hidden. Use `sti showall` first if you also want hidden notes back.
 
 Search splits the keywords on spaces and requires every keyword to appear in the note title or body, so `sti list milk todo` finds notes containing both words. Matching is case-insensitive.
 

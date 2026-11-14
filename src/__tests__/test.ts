@@ -529,6 +529,19 @@ describe("plugin query routing (no Stickies needed)", () => {
     expect(results[0].Actions?.[0].IsDefault).toBe(true)
   })
 
+  test("front query offers the bring-to-front action as default", async () => {
+    const results = await queryResults(ctx, "front")
+    expect(results.length).toBe(1)
+    expect(results[0].Actions?.[0].Id).toBe("bring-forward")
+    expect(results[0].Actions?.[0].IsDefault).toBe(true)
+  })
+
+  test("bring alias routes to the front command", async () => {
+    const results = await queryResults(ctx, "bring")
+    expect(results.length).toBe(1)
+    expect(results[0].Actions?.[0].Id).toBe("bring-forward")
+  })
+
   test("ping off Windows returns a readable error result, not a throw", async () => {
     const originalPlatform = process.platform
     Object.defineProperty(process, "platform", { value: "linux", configurable: true })
@@ -583,7 +596,7 @@ describe("plugin metadata i18n", () => {
 
   test("declares every command in plugin.json with translated descriptions", () => {
     const commands = pluginJson.Commands as Array<{ Command: string; Description: string; Aliases?: string[] }>
-    expect(commands.map(command => command.Command)).toEqual(["new", "list", "search", "paste", "hideall", "showall", "ping"])
+    expect(commands.map(command => command.Command)).toEqual(["new", "list", "search", "paste", "hideall", "showall", "front", "ping"])
 
     for (const command of commands) {
       expect(command.Description.startsWith("i18n:")).toBe(true)
@@ -595,6 +608,7 @@ describe("plugin metadata i18n", () => {
     const byName = new Map(commands.map(command => [command.Command, command]))
     expect(byName.get("list")?.Aliases).toContain("ls")
     expect(byName.get("search")?.Aliases).toContain("s")
+    expect(byName.get("front")?.Aliases).toContain("bring")
   })
 
   test("declares the new note title setting with translated labels", () => {

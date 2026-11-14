@@ -4,6 +4,7 @@ import {
   StickiesError,
   StickyNote,
   TitleMode,
+  bringForward,
   canFocusNote,
   closeNote,
   copyNoteContent,
@@ -669,6 +670,32 @@ export const plugin: Plugin = {
                     await showAll()
                     await notify(actionCtx, await t(actionCtx, "notify_showall"))
                   }
+                } catch (err) {
+                  await notifyError(actionCtx, err)
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+
+    // front / bring — raise every visible note above other windows.
+    if (head === "front" || head === "bring") {
+      return [
+        {
+          Title: await t(ctx, "front_title"),
+          SubTitle: await t(ctx, "front_subtitle"),
+          Icon: appIcon,
+          Actions: [
+            {
+              Id: "bring-forward",
+              Name: await t(ctx, "action_front"),
+              IsDefault: true,
+              Action: async (actionCtx: Context) => {
+                try {
+                  await bringForward()
+                  await notify(actionCtx, await t(actionCtx, "notify_front"))
                 } catch (err) {
                   await notifyError(actionCtx, err)
                 }
