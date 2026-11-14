@@ -1,6 +1,6 @@
 # Stickies
 
-Create, browse, search and manage [Stickies](https://www.zhornsoftware.co.uk/stickies/index.html) notes from Wox.
+Create, browse, search and manage [Stickies](https://www.zhornsoftware.co.uk/stickies/index.html) notes from [Wox](https://www.woxlauncher.com/).
 
 ![Stickies command list in Wox](screenshot.jpg)
 
