@@ -1,20 +1,20 @@
 {
-  "Id": "{{.Id}}",
-  "TriggerKeywords": [
-    "{{.TriggerKeyword}}"
-  ],
-  "Name": "{{.Name}}",
-  "Description": "{{.Description}}",
-  "Author": "{{.Author}}",
-  "Version": "0.0.1",
-  "MinWoxVersion": "2.0.0",
-  "Runtime": "nodejs",
-  "Website": "{{.Website}}",
-  "Entry": "index.js",
-  "Icon": "relative:images/app.svg",
-  "SupportedOS": [
-    "Windows",
-    "Linux",
-    "Darwin"
-  ]
+    "Id": "7ee8c76f-96db-4cba-b307-1528766c647c",
+    "TriggerKeywords": [
+        "sti"
+    ],
+    "Name": "Stickies",
+    "Description": "Create, list, search and roll up Stickies notes from Wox.",
+    "Author": "dragonish",
+    "Version": "0.0.1",
+    "MinWoxVersion": "2.0.0",
+    "Runtime": "nodejs",
+    "Website": "https://github.com/dragonish/Wox.Plugin.Stickies",
+    "Entry": "index.js",
+    "Icon": "relative:images/app.svg",
+    "SupportedOS": [
+        "Windows",
+        "Linux",
+        "Darwin"
+    ]
 }

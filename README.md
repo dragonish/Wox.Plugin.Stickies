@@ -1,11 +1,7 @@
-> For developer
-
-    Please run `make init` to initialize the project.
-
-# {{.Name}}
+# Stickies
 
 # Install
 
 ```
-wpm install {{.Name}}
+wpm install Stickies
 ```
