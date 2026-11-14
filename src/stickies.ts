@@ -64,6 +64,8 @@ export interface StickyNote {
   transparency: number | null
   /** Last change to the note's text, title, colour and similar fields. */
   modified: StickyModified | null
+  /** Id of the stack this note sits in, null when it is not in one. */
+  stackId: string | null
 }
 
 /** A note can be focused only while it is visible on the desktop and unrolled. */
@@ -401,8 +403,8 @@ export function matchNotes(notes: StickyNote[], query: string, imageTerms: strin
   })
 }
 
-/** Replies fetched per note by listNotes: utitle, utext, rolled, hidden, type, ontop, ghost, position, size, colour, transparency, modified. */
-const NOTE_REPLY_COUNT = 12
+/** Replies fetched per note by listNotes: utitle, utext, rolled, hidden, type, ontop, ghost, position, size, colour, transparency, modified, stack. */
+const NOTE_REPLY_COUNT = 13
 
 /** Parse one batched listNotes reply group per id. Missing replies are skipped. */
 export function parseNoteReplies(ids: string[], replies: StickiesReply[]): StickyNote[] {
@@ -424,6 +426,7 @@ export function parseNoteReplies(ids: string[], replies: StickiesReply[]): Stick
     const colorReply = replies[base + 9]
     const transparencyReply = replies[base + 10]
     const modifiedReply = replies[base + 11]
+    const stackReply = replies[base + 12]
     const text = textReply.code === "001" ? decodeUnicode(textReply.text) : ""
     let title = titleReply.code === "001" ? decodeUnicode(titleReply.text) : ""
     if (!title) {
@@ -443,20 +446,15 @@ export function parseNoteReplies(ids: string[], replies: StickiesReply[]): Stick
       size: sizeReply && sizeReply.code === "001" ? parseSize(sizeReply.text) : null,
       color: colorReply && colorReply.code === "001" ? parseColor(colorReply.text) : null,
       transparency: transparencyReply && transparencyReply.code === "001" ? parseTransparency(transparencyReply.text) : null,
-      modified: modifiedReply && modifiedReply.code === "001" ? parseModified(modifiedReply.text) : null
+      modified: modifiedReply && modifiedReply.code === "001" ? parseModified(modifiedReply.text) : null,
+      stackId: stackReply && stackReply.code === "001" ? parseStackId(stackReply.text) : null
     })
   }
   return notes
 }
 
-/** List desktop notes with title, text, flags, geometry, colour, transparency and modified time. */
-export async function listNotes(): Promise<StickyNote[]> {
-  const listReply = await runCommands(["api get list desktop"])
-  throwIfError(listReply[0], "List notes")
-  const ids = parseIdList(listReply[0]).slice(0, MAX_LIST_NOTES)
-  if (ids.length === 0) {
-    return []
-  }
+/** One "api get desktop ..." batch per note, in the order parseNoteReplies expects. */
+function noteCommands(ids: string[]): string[] {
   const commands: string[] = []
   for (const id of ids) {
     commands.push("api get desktop " + id + " utitle")
@@ -471,9 +469,20 @@ export async function listNotes(): Promise<StickyNote[]> {
     commands.push("api get desktop " + id + " colour")
     commands.push("api get desktop " + id + " transparency")
     commands.push("api get desktop " + id + " modified")
+    commands.push("api get desktop " + id + " stack")
   }
-  const replies = await runCommands(commands)
-  return parseNoteReplies(ids, replies)
+  return commands
+}
+
+/** List desktop notes with title, text, flags, geometry, colour, transparency, modified time and stack. */
+export async function listNotes(): Promise<StickyNote[]> {
+  const listReply = await runCommands(["api get list desktop"])
+  throwIfError(listReply[0], "List notes")
+  const ids = parseIdList(listReply[0]).slice(0, MAX_LIST_NOTES)
+  if (ids.length === 0) {
+    return []
+  }
+  return parseNoteReplies(ids, await runCommands(noteCommands(ids)))
 }
 
 /** A Stickies stack. Stack ids are integers and do not collide with note ids. */
@@ -555,6 +564,15 @@ export function formatModified(modified: StickyModified): string {
 }
 
 /**
+ * Parse "get desktop <id> stack", an undocumented command: the owning stack id,
+ * or "-1" when the note is not in a stack.
+ */
+export function parseStackId(text: string): string | null {
+  const value = (text || "").trim()
+  return /^[1-9]\d*$/.test(value) ? value : null
+}
+
+/**
  * Stickies' classic note palette. Only exact matches get a name; custom colours
  * fall back to their hex value so a note is never mislabelled.
  */
@@ -572,11 +590,15 @@ const NOTE_COLOR_NAMES: Array<{ color: StickyColor; key: string }> = [
 /** i18n key suffix ("grey", "yellow", ...) for a palette colour, or null for a custom one. */
 export function colorNameKey(color: StickyColor): string | null {
   for (const entry of NOTE_COLOR_NAMES) {
-    if (entry.color.r === color.r && entry.color.g === color.g && entry.color.b === color.b) {
+    if (sameColor(entry.color, color)) {
       return entry.key
     }
   }
   return null
+}
+
+function sameColor(left: StickyColor, right: StickyColor): boolean {
+  return left.r === right.r && left.g === right.g && left.b === right.b
 }
 
 /** "#E6E6E6" for a note colour. */
@@ -631,6 +653,17 @@ export function matchStacks(stacks: StickyStack[], query: string): StickyStack[]
   })
 }
 
+/** One "api get stack ..." batch per stack, in the order parseStackReplies expects. */
+function stackCommands(ids: string[]): string[] {
+  const commands: string[] = []
+  for (const id of ids) {
+    commands.push("api get stack " + id + " utitle")
+    commands.push("api get stack " + id + " position")
+    commands.push("api get stack " + id + " size")
+  }
+  return commands
+}
+
 /** List stacks with title, screen position and size. */
 export async function listStacks(): Promise<StickyStack[]> {
   const listReply = await runCommands(["api get list stacks"])
@@ -639,13 +672,68 @@ export async function listStacks(): Promise<StickyStack[]> {
   if (ids.length === 0) {
     return []
   }
-  const commands: string[] = []
-  for (const id of ids) {
-    commands.push("api get stack " + id + " utitle")
-    commands.push("api get stack " + id + " position")
-    commands.push("api get stack " + id + " size")
+  return parseStackReplies(ids, await runCommands(stackCommands(ids)))
+}
+
+/**
+ * Stacks plus every desktop note in two powershell launches: both id lists share
+ * the first batch and all per-id queries share the second, so the stacks view
+ * stays as fast as a single list query.
+ */
+export async function listStacksWithNotes(): Promise<{ stacks: StickyStack[]; notes: StickyNote[] }> {
+  const lists = await runCommands(["api get list stacks", "api get list desktop"])
+  throwIfError(lists[0], "List stacks")
+  throwIfError(lists[1], "List notes")
+  const stackIds = parseIdList(lists[0]).slice(0, MAX_LIST_STACKS)
+  const noteIds = parseIdList(lists[1]).slice(0, MAX_LIST_NOTES)
+  const commands = stackCommands(stackIds).concat(noteCommands(noteIds))
+  if (commands.length === 0) {
+    return { stacks: [], notes: [] }
   }
-  return parseStackReplies(ids, await runCommands(commands))
+  const replies = await runCommands(commands)
+  const stackReplyCount = stackIds.length * STACK_REPLY_COUNT
+  return {
+    stacks: parseStackReplies(stackIds, replies.slice(0, stackReplyCount)),
+    notes: parseNoteReplies(noteIds, replies.slice(stackReplyCount))
+  }
+}
+
+export interface StackSummary {
+  /** Notes whose "stack" attribute points at this stack. */
+  noteCount: number
+  /** Shared member colour, null when the members differ or report none. */
+  color: StickyColor | null
+  /** Distinct member colours, ignoring notes that report none. */
+  colorCount: number
+  /** Latest modification among the members. */
+  modified: StickyModified | null
+}
+
+/**
+ * Aggregate the notes that sit in a stack. Membership comes from the
+ * undocumented "get desktop <id> stack" command, so an older Stickies that
+ * does not answer it simply yields an empty summary.
+ */
+export function summarizeStack(stackId: string, notes: StickyNote[]): StackSummary {
+  const members = notes.filter(note => note.stackId === stackId)
+  const colors: StickyColor[] = []
+  let modified: StickyModified | null = null
+  for (const member of members) {
+    const color = member.color
+    if (color && !colors.some(known => sameColor(known, color))) {
+      colors.push(color)
+    }
+    const stamp = member.modified
+    if (stamp && (!modified || stamp.epoch > modified.epoch)) {
+      modified = stamp
+    }
+  }
+  return {
+    noteCount: members.length,
+    color: colors.length === 1 ? colors[0] : null,
+    colorCount: colors.length,
+    modified: modified
+  }
 }
 
 /** "api do stack <id> stacked|unstacked|togglestacked". */

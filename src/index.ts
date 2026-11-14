@@ -2,6 +2,7 @@ import { ActionContext, Context, ExecuteResultAction, Plugin, PluginInitParams, 
 import { COMMANDS } from "./commands"
 import {
   MAX_TEXT_LENGTH,
+  StackSummary,
   StickiesError,
   StickyNote,
   StickyStack,
@@ -20,7 +21,7 @@ import {
   formatModified,
   hideAll,
   listNotes,
-  listStacks,
+  listStacksWithNotes,
   matchNotes,
   matchStacks,
   normalizeTitleMode,
@@ -31,7 +32,8 @@ import {
   setOnTop,
   setStackState,
   setRolled,
-  showAll
+  showAll,
+  summarizeStack
 } from "./stickies"
 
 let api: PublicAPI
@@ -340,11 +342,25 @@ interface StackLabels {
   toggle: string
   stack: string
   unstack: string
+  count: string
+  colorCount: string
+  modified: string
+  /** Localized names for the known Stickies palette, keyed by color name key. */
+  colorNames: Record<string, string>
 }
 
 async function loadStackLabels(ctx: Context): Promise<StackLabels> {
-  const [untitled, toggle, stack, unstack] = await Promise.all([t(ctx, "stack_untitled"), t(ctx, "action_stack_toggle"), t(ctx, "action_stack_stacked"), t(ctx, "action_stack_unstacked")])
-  return { untitled, toggle, stack, unstack }
+  const [untitled, toggle, stack, unstack, count, colorCount, modified, colorNames] = await Promise.all([
+    t(ctx, "stack_untitled"),
+    t(ctx, "action_stack_toggle"),
+    t(ctx, "action_stack_stacked"),
+    t(ctx, "action_stack_unstacked"),
+    t(ctx, "stack_count"),
+    t(ctx, "stack_color_count"),
+    t(ctx, "stack_modified"),
+    loadColorNames(ctx)
+  ])
+  return { untitled, toggle, stack, unstack, count, colorCount, modified, colorNames }
 }
 
 /** List every desktop note, caching each row's text for its copy action. */
@@ -808,7 +824,7 @@ async function helpResults(ctx: Context, trigger: string | null): Promise<Result
 /** List stacks, or filter them by title keyword. */
 async function stackResults(ctx: Context, keyword: string): Promise<Result[]> {
   try {
-    const stacks = await listStacks()
+    const { stacks, notes } = await listStacksWithNotes()
     if (stacks.length === 0) {
       return [
         {
@@ -831,19 +847,33 @@ async function stackResults(ctx: Context, keyword: string): Promise<Result[]> {
       ]
     }
     const labels = await loadStackLabels(ctx)
-    return hits.map(stack => stackResult(stack, labels))
+    return hits.map(stack => stackResult(stack, labels, summarizeStack(stack.id, notes)))
   } catch (err) {
     return [await errorResult(ctx, err)]
   }
 }
 
-function stackResult(stack: StickyStack, labels: StackLabels): Result {
+function stackResult(stack: StickyStack, labels: StackLabels, summary: StackSummary): Result {
   const meta: string[] = ["ID " + stack.id]
+  if (summary.noteCount > 0) {
+    meta.push(format(labels.count, String(summary.noteCount)))
+  }
   if (stack.position) {
     meta.push(stack.position.x + "," + stack.position.y)
   }
   if (stack.size) {
     meta.push(stack.size.width + "x" + stack.size.height)
+  }
+  if (summary.color) {
+    const nameKey = colorNameKey(summary.color)
+    const name = nameKey ? labels.colorNames[nameKey] : ""
+    const hex = colorHex(summary.color)
+    meta.push(name ? name + " " + hex : hex)
+  } else if (summary.colorCount > 1) {
+    meta.push(format(labels.colorCount, String(summary.colorCount)))
+  }
+  if (summary.modified) {
+    meta.push(format(labels.modified, formatModified(summary.modified)))
   }
   return {
     Title: stack.title || labels.untitled,

@@ -29,9 +29,12 @@ import {
   parsePosition,
   parseReply,
   parseSize,
+  parseStackId,
   parseStackReplies,
   parseTransparency,
-  stackStateFromReply
+  stackStateFromReply,
+  StickyNote,
+  summarizeStack
 } from "../stickies"
 
 const DEFAULT_TRIGGER = "sti"
@@ -161,7 +164,8 @@ describe("note focus eligibility", () => {
     size: null,
     color: null,
     transparency: null,
-    modified: null
+    modified: null,
+    stackId: null
   }
 
   test("offers focus only for visible, unrolled desktop notes", () => {
@@ -186,7 +190,8 @@ describe("note default action", () => {
     size: null,
     color: null,
     transparency: null,
-    modified: null
+    modified: null,
+    stackId: null
   }
 
   test("reveals a hidden note before anything else", () => {
@@ -215,7 +220,8 @@ describe("note keyword matching", () => {
       size: null,
       color: null,
       transparency: null,
-      modified: null
+      modified: null,
+      stackId: null
     },
     {
       id: "n2",
@@ -230,7 +236,8 @@ describe("note keyword matching", () => {
       size: null,
       color: null,
       transparency: null,
-      modified: null
+      modified: null,
+      stackId: null
     },
     {
       id: "n3",
@@ -245,7 +252,8 @@ describe("note keyword matching", () => {
       size: null,
       color: null,
       transparency: null,
-      modified: null
+      modified: null,
+      stackId: null
     },
     {
       id: "n4",
@@ -260,7 +268,8 @@ describe("note keyword matching", () => {
       size: null,
       color: null,
       transparency: null,
-      modified: null
+      modified: null,
+      stackId: null
     }
   ]
   const ids = (list: Array<{ id: string }>): string[] => list.map(note => note.id)
@@ -297,7 +306,22 @@ describe("note keyword matching", () => {
   test("matches image notes through localized image terms", () => {
     const withImages = [
       ...notes,
-      { id: "img", title: "", text: "", image: true, rolled: false, hidden: false, ontop: false, ghost: false, position: null, size: null, color: null, transparency: null, modified: null }
+      {
+        id: "img",
+        title: "",
+        text: "",
+        image: true,
+        rolled: false,
+        hidden: false,
+        ontop: false,
+        ghost: false,
+        position: null,
+        size: null,
+        color: null,
+        transparency: null,
+        modified: null,
+        stackId: null
+      }
     ]
     expect(ids(matchNotes(withImages, "图片"))).toEqual([])
     expect(ids(matchNotes(withImages, "图片", ["图片", "image"]))).toEqual(["img"])
@@ -321,7 +345,8 @@ describe("note keyword matching", () => {
       size: null,
       color: null,
       transparency: null,
-      modified: null
+      modified: null,
+      stackId: null
     }
     expect(ids(matchNotes([imageWithText], "截图"))).toEqual(["img"])
     expect(ids(matchNotes([imageWithText], "chart"))).toEqual(["img"])
@@ -385,7 +410,21 @@ describe("note click-through command", () => {
 
 describe("batched note reply parsing", () => {
   const reply = (code: string, text = "") => ({ code, text, raw: code + (text ? " " + text : "") })
-  const group = (title: string, text: string, rolled: string, hidden: string, type: string, ontop = "0", ghost = "0", position = "", size = "", color = "", transparency = "", modified = "") => [
+  const group = (
+    title: string,
+    text: string,
+    rolled: string,
+    hidden: string,
+    type: string,
+    ontop = "0",
+    ghost = "0",
+    position = "",
+    size = "",
+    color = "",
+    transparency = "",
+    modified = "",
+    stack = ""
+  ) => [
     reply("001", title),
     reply("001", text),
     reply("001", rolled),
@@ -397,13 +436,14 @@ describe("batched note reply parsing", () => {
     reply("001", size),
     reply("001", color),
     reply("001", transparency),
-    reply("001", modified)
+    reply("001", modified),
+    reply("001", stack)
   ]
 
-  test("reads title, text, flags, geometry, colour, transparency and modified for every id", () => {
+  test("reads title, text, flags, geometry, colour, transparency, modified and stack for every id", () => {
     const replies = [
-      ...group(encodeUnicode("Title A"), encodeUnicode("Body A"), "0", "1", "0", "1", "0", "3294,552", "406x100", "230,230,230", "90", "1761640452 2025 10 28 16 34 12 3"),
-      ...group("", "", "1", "0", "1", "0", "1", "-10,20", "200x50", "255,204,204", "100", "1700000000 2023 11 14 9 5 3 2")
+      ...group(encodeUnicode("Title A"), encodeUnicode("Body A"), "0", "1", "0", "1", "0", "3294,552", "406x100", "230,230,230", "90", "1761640452 2025 10 28 16 34 12 3", "6"),
+      ...group("", "", "1", "0", "1", "0", "1", "-10,20", "200x50", "255,204,204", "100", "1700000000 2023 11 14 9 5 3 2", "-1")
     ]
     const notes = parseNoteReplies(["a", "b"], replies)
 
@@ -421,7 +461,8 @@ describe("batched note reply parsing", () => {
         size: { width: 406, height: 100 },
         color: { r: 230, g: 230, b: 230 },
         transparency: 90,
-        modified: { epoch: 1761640452, year: 2025, month: 10, day: 28, hours: 16, minutes: 34, seconds: 12 }
+        modified: { epoch: 1761640452, year: 2025, month: 10, day: 28, hours: 16, minutes: 34, seconds: 12 },
+        stackId: "6"
       },
       {
         id: "b",
@@ -436,7 +477,8 @@ describe("batched note reply parsing", () => {
         size: { width: 200, height: 50 },
         color: { r: 255, g: 204, b: 204 },
         transparency: 100,
-        modified: { epoch: 1700000000, year: 2023, month: 11, day: 14, hours: 9, minutes: 5, seconds: 3 }
+        modified: { epoch: 1700000000, year: 2023, month: 11, day: 14, hours: 9, minutes: 5, seconds: 3 },
+        stackId: null
       }
     ])
   })
@@ -471,6 +513,7 @@ describe("batched note reply parsing", () => {
     expect(failed[0].color).toBeNull()
     expect(failed[0].transparency).toBeNull()
     expect(failed[0].modified).toBeNull()
+    expect(failed[0].stackId).toBeNull()
   })
 
   test("falls back to the first body line when the title is empty", () => {
@@ -542,6 +585,70 @@ describe("note attribute parsing", () => {
     expect(colorNameKey({ r: 229, g: 230, b: 230 })).toBeNull()
     expect(colorNameKey({ r: 1, g: 2, b: 3 })).toBeNull()
   })
+
+  test("parses the undocumented stack id, treating -1 as no stack", () => {
+    expect(parseStackId("6")).toBe("6")
+    expect(parseStackId(" 12 ")).toBe("12")
+    expect(parseStackId("-1")).toBeNull()
+    expect(parseStackId("0")).toBeNull()
+    expect(parseStackId("")).toBeNull()
+    expect(parseStackId("999 Not understood")).toBeNull()
+  })
+})
+
+describe("stack summary", () => {
+  const note = (overrides: Partial<StickyNote>): StickyNote => ({
+    id: "n",
+    title: "",
+    text: "",
+    image: false,
+    rolled: false,
+    hidden: false,
+    ontop: false,
+    ghost: false,
+    position: null,
+    size: null,
+    color: null,
+    transparency: null,
+    modified: null,
+    stackId: null,
+    ...overrides
+  })
+
+  test("counts members and reports their shared colour", () => {
+    const notes = [
+      note({ id: "a", stackId: "6", color: { r: 230, g: 230, b: 230 } }),
+      note({ id: "b", stackId: "6", color: { r: 230, g: 230, b: 230 } }),
+      note({ id: "c", stackId: "9", color: { r: 255, g: 204, b: 204 } }),
+      note({ id: "d" })
+    ]
+    expect(summarizeStack("6", notes)).toEqual({ noteCount: 2, color: { r: 230, g: 230, b: 230 }, colorCount: 1, modified: null })
+  })
+
+  test("drops the shared colour when members differ", () => {
+    const notes = [
+      note({ id: "a", stackId: "6", color: { r: 230, g: 230, b: 230 } }),
+      note({ id: "b", stackId: "6", color: { r: 255, g: 204, b: 204 } }),
+      note({ id: "c", stackId: "6", color: { r: 230, g: 230, b: 230 } })
+    ]
+    expect(summarizeStack("6", notes)).toEqual({ noteCount: 3, color: null, colorCount: 2, modified: null })
+  })
+
+  test("ignores notes without a colour when counting colours", () => {
+    const notes = [note({ id: "a", stackId: "6", color: { r: 230, g: 230, b: 230 } }), note({ id: "b", stackId: "6" })]
+    expect(summarizeStack("6", notes)).toEqual({ noteCount: 2, color: { r: 230, g: 230, b: 230 }, colorCount: 1, modified: null })
+  })
+
+  test("takes the latest modification among members", () => {
+    const early = { epoch: 1700000000, year: 2023, month: 11, day: 14, hours: 9, minutes: 5, seconds: 3 }
+    const late = { epoch: 1761640452, year: 2025, month: 10, day: 28, hours: 16, minutes: 34, seconds: 12 }
+    const notes = [note({ id: "a", stackId: "6", modified: late }), note({ id: "b", stackId: "6", modified: early }), note({ id: "c", stackId: "9", modified: late }), note({ id: "d", stackId: "6" })]
+    expect(summarizeStack("6", notes).modified).toEqual(late)
+  })
+
+  test("returns an empty summary when the stack has no members", () => {
+    expect(summarizeStack("6", [note({ id: "a" }), note({ id: "b", stackId: "9" })])).toEqual({ noteCount: 0, color: null, colorCount: 0, modified: null })
+  })
 })
 
 describe("note preview tags", () => {
@@ -558,7 +665,8 @@ describe("note preview tags", () => {
     size: { width: 406, height: 100 },
     color: { r: 230, g: 230, b: 230 },
     transparency: 90,
-    modified: { epoch: 1761640452, year: 2025, month: 10, day: 28, hours: 16, minutes: 34, seconds: 12 }
+    modified: { epoch: 1761640452, year: 2025, month: 10, day: 28, hours: 16, minutes: 34, seconds: 12 },
+    stackId: null
   }
   const labels = {
     tagPosition: "Position",
