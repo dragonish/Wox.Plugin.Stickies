@@ -53,7 +53,7 @@ else
 endif
 
 dev: check-init check-dev-deps
-	$(NODEMON) --watch $(SRC_DIR) --watch images --watch plugin.json --ext json,ts,js,mjs,png --exec "$(MAKE) build"
+	$(NODEMON) --watch $(SRC_DIR) --watch images --watch plugin.json --ext json,ts,js,mjs,ps1,png --exec "$(MAKE) build"
 
 lint: check-init check-dev-deps
 	$(ESLINT) $(SRC_DIR)
@@ -72,9 +72,15 @@ endif
 ifeq ($(OS),Windows_NT)
 	$(POWERSHELL) "Copy-Item 'images' -Destination '$(DIST_DIR)' -Recurse"
 	$(POWERSHELL) "Copy-Item 'plugin.json' -Destination '$(DIST_DIR)'"
+	$(POWERSHELL) "Copy-Item '$(SRC_DIR)/bridge.ps1' -Destination '$(DIST_DIR)'"
+	$(POWERSHELL) "if (-not (Test-Path '$(DIST_DIR)/index.js')) { throw 'build is missing index.js in $(DIST_DIR)' }; if (-not (Test-Path '$(DIST_DIR)/plugin.json')) { throw 'build is missing plugin.json in $(DIST_DIR)' }; if (-not (Test-Path '$(DIST_DIR)/bridge.ps1')) { throw 'build is missing bridge.ps1 in $(DIST_DIR)' }"
 else
 	cp -r images $(DIST_DIR)
 	cp plugin.json $(DIST_DIR)
+	cp $(SRC_DIR)/bridge.ps1 $(DIST_DIR)
+	@for f in index.js plugin.json bridge.ps1; do \
+		if [ ! -f "$(DIST_DIR)/$$f" ]; then echo "build is missing $$f in $(DIST_DIR)" >&2; exit 1; fi; \
+	done
 endif
 
 test: check-init check-dev-deps
