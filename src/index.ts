@@ -1,4 +1,4 @@
-import { ActionContext, Context, ExecuteResultAction, Plugin, PluginInitParams, PublicAPI, Query, Result, ResultAction, ResultTail, WoxImage } from "@wox-launcher/wox-plugin"
+import { ActionContext, Context, ExecuteResultAction, Plugin, PluginInitParams, PublicAPI, Query, Result, ResultAction, ResultTail, WoxImage, WoxPreviewTag } from "@wox-launcher/wox-plugin"
 import { COMMANDS } from "./commands"
 import {
   MAX_TEXT_LENGTH,
@@ -9,12 +9,15 @@ import {
   bringForward,
   canFocusNote,
   closeNote,
+  colorHex,
+  colorNameKey,
   copyNoteContent,
   createSticky,
   createStickyFromClipboard,
   deleteNote,
   firstLine,
   focusNote,
+  formatModified,
   hideAll,
   listNotes,
   listStacks,
@@ -189,6 +192,13 @@ interface NoteLabels {
   subtitle: string
   emptyPreview: string
   imagePreview: string
+  tagPosition: string
+  tagSize: string
+  tagModified: string
+  tagColor: string
+  tagTransparency: string
+  /** Localized names for the known Stickies palette, keyed by color name key. */
+  colorNames: Record<string, string>
   tailRolled: string
   tailImage: string
   tailOnTop: string
@@ -218,6 +228,11 @@ async function loadNoteLabels(ctx: Context): Promise<NoteLabels> {
     subtitle,
     emptyPreview,
     imagePreview,
+    tagPosition,
+    tagSize,
+    tagModified,
+    tagColor,
+    tagTransparency,
     tailRolled,
     tailImage,
     tailOnTop,
@@ -244,6 +259,11 @@ async function loadNoteLabels(ctx: Context): Promise<NoteLabels> {
     t(ctx, "note_subtitle"),
     t(ctx, "note_preview_empty"),
     t(ctx, "note_image_preview"),
+    t(ctx, "preview_tag_position"),
+    t(ctx, "preview_tag_size"),
+    t(ctx, "preview_tag_modified"),
+    t(ctx, "preview_tag_color"),
+    t(ctx, "preview_tag_transparency"),
     t(ctx, "note_tail_rolled"),
     t(ctx, "note_tail_image"),
     t(ctx, "note_tail_ontop"),
@@ -264,6 +284,7 @@ async function loadNoteLabels(ctx: Context): Promise<NoteLabels> {
     t(ctx, "action_close_note"),
     t(ctx, "action_delete_note")
   ])
+  const colorNames = await loadColorNames(ctx)
   return {
     stateRolled,
     stateHidden,
@@ -271,6 +292,11 @@ async function loadNoteLabels(ctx: Context): Promise<NoteLabels> {
     subtitle,
     emptyPreview,
     imagePreview,
+    tagPosition,
+    tagSize,
+    tagModified,
+    tagColor,
+    tagTransparency,
     tailRolled,
     tailImage,
     tailOnTop,
@@ -289,8 +315,23 @@ async function loadNoteLabels(ctx: Context): Promise<NoteLabels> {
     show,
     hide,
     closeNote,
-    deleteNote
+    deleteNote,
+    colorNames
   }
+}
+
+async function loadColorNames(ctx: Context): Promise<Record<string, string>> {
+  const [grey, white, yellow, green, blue, pink, purple, orange] = await Promise.all([
+    t(ctx, "color_grey"),
+    t(ctx, "color_white"),
+    t(ctx, "color_yellow"),
+    t(ctx, "color_green"),
+    t(ctx, "color_blue"),
+    t(ctx, "color_pink"),
+    t(ctx, "color_purple"),
+    t(ctx, "color_orange")
+  ])
+  return { grey, white, yellow, green, blue, pink, purple, orange }
 }
 
 /** Labels a stack row needs. Loaded once per stacks query. */
@@ -385,6 +426,44 @@ async function createResult(ctx: Context, text: string): Promise<Result> {
       }
     ]
   }
+}
+
+/** Everything notePreviewTags needs from NoteLabels; kept narrow so it is easy to test. */
+export interface PreviewTagLabels {
+  tagPosition: string
+  tagSize: string
+  tagModified: string
+  tagColor: string
+  tagTransparency: string
+  colorNames: Record<string, string>
+}
+
+/**
+ * Preview metadata chips for a note: position, size, modified time, colour and
+ * transparency. Missing values (older Stickies, failed replies) omit their chip;
+ * an opaque note omits the transparency chip because the value carries no news.
+ */
+export function notePreviewTags(note: StickyNote, labels: PreviewTagLabels): WoxPreviewTag[] {
+  const tags: WoxPreviewTag[] = []
+  if (note.position) {
+    tags.push({ Label: note.position.x + "," + note.position.y, Tooltip: labels.tagPosition })
+  }
+  if (note.size) {
+    tags.push({ Label: note.size.width + "x" + note.size.height, Tooltip: labels.tagSize })
+  }
+  if (note.modified) {
+    tags.push({ Label: formatModified(note.modified), Tooltip: labels.tagModified })
+  }
+  if (note.color) {
+    const nameKey = colorNameKey(note.color)
+    const name = nameKey ? labels.colorNames[nameKey] : ""
+    const hex = colorHex(note.color)
+    tags.push({ Label: name ? name + " " + hex : hex, Tooltip: labels.tagColor })
+  }
+  if (typeof note.transparency === "number" && note.transparency !== 0 && note.transparency !== 100) {
+    tags.push({ Label: note.transparency + "%", Tooltip: labels.tagTransparency })
+  }
+  return tags
 }
 
 function noteResult(note: StickyNote, labels: NoteLabels): Result {
@@ -552,7 +631,8 @@ function noteResult(note: StickyNote, labels: NoteLabels): Result {
     Icon: appIcon,
     Preview: {
       PreviewType: "markdown",
-      PreviewData: preview
+      PreviewData: preview,
+      PreviewTags: notePreviewTags(note, labels)
     },
     Tails: tails,
     Actions: actions

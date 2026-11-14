@@ -24,6 +24,24 @@ export interface StickiesReply {
   raw: string
 }
 
+export interface StickyColor {
+  r: number
+  g: number
+  b: number
+}
+
+/** Last modification time reported by Stickies, already in local time. */
+export interface StickyModified {
+  /** Seconds since the Unix epoch, for comparisons. */
+  epoch: number
+  year: number
+  month: number
+  day: number
+  hours: number
+  minutes: number
+  seconds: number
+}
+
 export interface StickyNote {
   id: string
   title: string
@@ -36,6 +54,16 @@ export interface StickyNote {
   ontop: boolean
   /** Click-through note (Stickies `ghost`): visible, but ignores the mouse. */
   ghost: boolean
+  /** Screen position, null when the API did not report it. */
+  position: { x: number; y: number } | null
+  /** Window size, null when the API did not report it. Rolled notes report their title bar. */
+  size: { width: number; height: number } | null
+  /** Background colour, null when the API did not report it. */
+  color: StickyColor | null
+  /** Percentage 0-100; both 0 and 100 mean the note is opaque. */
+  transparency: number | null
+  /** Last change to the note's text, title, colour and similar fields. */
+  modified: StickyModified | null
 }
 
 /** A note can be focused only while it is visible on the desktop and unrolled. */
@@ -103,10 +131,14 @@ export function normalizeTitleMode(value: string | null | undefined): TitleMode 
   return "stickies"
 }
 
+/** Two digits, so month/day/hour/minute always align. */
+function pad2(value: number): string {
+  return (value < 10 ? "0" : "") + value
+}
+
 /** Local time formatted the way Stickies shows creation-time titles. */
 export function formatCreatedTitle(date: Date = new Date()): string {
-  const pad = (value: number): string => (value < 10 ? "0" : "") + value
-  return date.getFullYear() + "-" + pad(date.getMonth() + 1) + "-" + pad(date.getDate()) + " " + pad(date.getHours()) + ":" + pad(date.getMinutes())
+  return date.getFullYear() + "-" + pad2(date.getMonth() + 1) + "-" + pad2(date.getDate()) + " " + pad2(date.getHours()) + ":" + pad2(date.getMinutes())
 }
 
 /** The title derived from the note body in "content" mode. */
@@ -369,8 +401,8 @@ export function matchNotes(notes: StickyNote[], query: string, imageTerms: strin
   })
 }
 
-/** Replies fetched per note by listNotes: utitle, utext, rolled, hidden, type, ontop, ghost. */
-const NOTE_REPLY_COUNT = 7
+/** Replies fetched per note by listNotes: utitle, utext, rolled, hidden, type, ontop, ghost, position, size, colour, transparency, modified. */
+const NOTE_REPLY_COUNT = 12
 
 /** Parse one batched listNotes reply group per id. Missing replies are skipped. */
 export function parseNoteReplies(ids: string[], replies: StickiesReply[]): StickyNote[] {
@@ -387,6 +419,11 @@ export function parseNoteReplies(ids: string[], replies: StickiesReply[]): Stick
     const typeReply = replies[base + 4]
     const ontopReply = replies[base + 5]
     const ghostReply = replies[base + 6]
+    const positionReply = replies[base + 7]
+    const sizeReply = replies[base + 8]
+    const colorReply = replies[base + 9]
+    const transparencyReply = replies[base + 10]
+    const modifiedReply = replies[base + 11]
     const text = textReply.code === "001" ? decodeUnicode(textReply.text) : ""
     let title = titleReply.code === "001" ? decodeUnicode(titleReply.text) : ""
     if (!title) {
@@ -401,13 +438,18 @@ export function parseNoteReplies(ids: string[], replies: StickiesReply[]): Stick
       rolled: rolledReply ? rolledReply.text === "1" : false,
       hidden: hiddenReply ? hiddenReply.text === "1" : false,
       ontop: ontopReply ? ontopReply.code === "001" && ontopReply.text.trim() === "1" : false,
-      ghost: ghostReply ? ghostReply.code === "001" && ghostReply.text.trim() === "1" : false
+      ghost: ghostReply ? ghostReply.code === "001" && ghostReply.text.trim() === "1" : false,
+      position: positionReply && positionReply.code === "001" ? parsePosition(positionReply.text) : null,
+      size: sizeReply && sizeReply.code === "001" ? parseSize(sizeReply.text) : null,
+      color: colorReply && colorReply.code === "001" ? parseColor(colorReply.text) : null,
+      transparency: transparencyReply && transparencyReply.code === "001" ? parseTransparency(transparencyReply.text) : null,
+      modified: modifiedReply && modifiedReply.code === "001" ? parseModified(modifiedReply.text) : null
     })
   }
   return notes
 }
 
-/** List desktop notes with title, full text, image flag, rolled, hidden, ontop and ghost state. */
+/** List desktop notes with title, text, flags, geometry, colour, transparency and modified time. */
 export async function listNotes(): Promise<StickyNote[]> {
   const listReply = await runCommands(["api get list desktop"])
   throwIfError(listReply[0], "List notes")
@@ -424,6 +466,11 @@ export async function listNotes(): Promise<StickyNote[]> {
     commands.push("api get desktop " + id + " type")
     commands.push("api get desktop " + id + " ontop")
     commands.push("api get desktop " + id + " ghost")
+    commands.push("api get desktop " + id + " position")
+    commands.push("api get desktop " + id + " size")
+    commands.push("api get desktop " + id + " colour")
+    commands.push("api get desktop " + id + " transparency")
+    commands.push("api get desktop " + id + " modified")
   }
   const replies = await runCommands(commands)
   return parseNoteReplies(ids, replies)
@@ -441,16 +488,105 @@ export interface StickyStack {
 
 export type StackState = "stacked" | "unstacked"
 
-/** Parse "get stack <id> position": "3294,552" -> { x, y }. */
-export function parseStackPosition(text: string): { x: number; y: number } | null {
+/** Parse a position reply, from notes or stacks: "3294,552" -> { x, y }. */
+export function parsePosition(text: string): { x: number; y: number } | null {
   const match = /^(-?\d+)\s*,\s*(-?\d+)$/.exec((text || "").trim())
   return match ? { x: Number(match[1]), y: Number(match[2]) } : null
 }
 
-/** Parse "get stack <id> size": "406x100" -> { width, height }. */
-export function parseStackSize(text: string): { width: number; height: number } | null {
+/** Parse a size reply, from notes or stacks: "406x100" -> { width, height }. */
+export function parseSize(text: string): { width: number; height: number } | null {
   const match = /^(\d+)\s*[xX]\s*(\d+)$/.exec((text || "").trim())
   return match ? { width: Number(match[1]), height: Number(match[2]) } : null
+}
+
+/** Parse "get desktop <id> colour": "230,230,230" -> { r, g, b }. */
+export function parseColor(text: string): StickyColor | null {
+  const match = /^(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})$/.exec((text || "").trim())
+  if (!match) {
+    return null
+  }
+  const r = Number(match[1])
+  const g = Number(match[2])
+  const b = Number(match[3])
+  if (r > 255 || g > 255 || b > 255) {
+    return null
+  }
+  return { r: r, g: g, b: b }
+}
+
+/** Parse "get desktop <id> transparency": "90" -> 90. 0 and 100 both mean opaque. */
+export function parseTransparency(text: string): number | null {
+  const match = /^\d{1,3}$/.exec((text || "").trim())
+  if (!match) {
+    return null
+  }
+  const value = Number(match[0])
+  return value <= 100 ? value : null
+}
+
+/** Parse "get desktop <id> modified": epoch, year, month, day, hours, minutes, seconds, day of week. */
+export function parseModified(text: string): StickyModified | null {
+  const parts = (text || "").trim().split(/\s+/)
+  if (parts.length < 7) {
+    return null
+  }
+  const numbers: number[] = []
+  for (let i = 0; i < 7; i++) {
+    if (!/^\d+$/.test(parts[i])) {
+      return null
+    }
+    numbers.push(Number(parts[i]))
+  }
+  return {
+    epoch: numbers[0],
+    year: numbers[1],
+    month: numbers[2],
+    day: numbers[3],
+    hours: numbers[4],
+    minutes: numbers[5],
+    seconds: numbers[6]
+  }
+}
+
+/** "2025-10-28 16:34" from the local-time fields Stickies reports. */
+export function formatModified(modified: StickyModified): string {
+  return modified.year + "-" + pad2(modified.month) + "-" + pad2(modified.day) + " " + pad2(modified.hours) + ":" + pad2(modified.minutes)
+}
+
+/**
+ * Stickies' classic note palette. Only exact matches get a name; custom colours
+ * fall back to their hex value so a note is never mislabelled.
+ */
+const NOTE_COLOR_NAMES: Array<{ color: StickyColor; key: string }> = [
+  { color: { r: 230, g: 230, b: 230 }, key: "grey" },
+  { color: { r: 255, g: 255, b: 255 }, key: "white" },
+  { color: { r: 255, g: 255, b: 128 }, key: "yellow" },
+  { color: { r: 204, g: 255, b: 204 }, key: "green" },
+  { color: { r: 204, g: 255, b: 255 }, key: "blue" },
+  { color: { r: 255, g: 204, b: 204 }, key: "pink" },
+  { color: { r: 204, g: 204, b: 255 }, key: "purple" },
+  { color: { r: 255, g: 204, b: 153 }, key: "orange" }
+]
+
+/** i18n key suffix ("grey", "yellow", ...) for a palette colour, or null for a custom one. */
+export function colorNameKey(color: StickyColor): string | null {
+  for (const entry of NOTE_COLOR_NAMES) {
+    if (entry.color.r === color.r && entry.color.g === color.g && entry.color.b === color.b) {
+      return entry.key
+    }
+  }
+  return null
+}
+
+/** "#E6E6E6" for a note colour. */
+export function colorHex(color: StickyColor): string {
+  return "#" + hex2(color.r) + hex2(color.g) + hex2(color.b)
+}
+
+function hex2(value: number): string {
+  const text = value.toString(16).toUpperCase()
+  return text.length < 2 ? "0" + text : text
 }
 
 /** Replies fetched per stack by listStacks: utitle, position, size. */
@@ -470,8 +606,8 @@ export function parseStackReplies(ids: string[], replies: StickiesReply[]): Stic
     stacks.push({
       id: ids[i],
       title: titleReply.code === "001" ? decodeUnicode(titleReply.text) : "",
-      position: positionReply && positionReply.code === "001" ? parseStackPosition(positionReply.text) : null,
-      size: sizeReply && sizeReply.code === "001" ? parseStackSize(sizeReply.text) : null
+      position: positionReply && positionReply.code === "001" ? parsePosition(positionReply.text) : null,
+      size: sizeReply && sizeReply.code === "001" ? parseSize(sizeReply.text) : null
     })
   }
   return stacks

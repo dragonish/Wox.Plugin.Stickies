@@ -35,6 +35,10 @@ Search splits the keywords on spaces and requires every keyword to appear in the
 
 Image notes have no text body, so they get an **image** tag in the list and an `(image note, no text)` preview instead of looking empty. They can be filtered with the localized image words, for example `sti list image` or `sti list 图片`. A note that mixes text and an embedded image is still listed with its text; only pure image notes are detected through the API.
 
+Selecting a note shows metadata tags below the preview: screen position (`x,y`), window size (`WxH`), last modified time (`YYYY-MM-DD HH:MM`), background colour (`Grey #E6E6E6`, or just the hex value for colours outside Stickies' palette) and transparency (`90%`). Hover a tag to see which attribute it is. Rolled notes report their title bar size, because that is what Stickies returns for a rolled window, and fully opaque notes (API value 0 or 100) omit the transparency tag.
+
+The `modified` value only tracks changes to a note's text, title, colour and similar fields: moving, resizing, on-top, transparency, rolling up and ghost mode do not update it.
+
 Bare text such as `sti buy milk` is no longer created implicitly; the plugin offers to complete it as `sti new buy milk`.
 
 For a note that is visible on the desktop and not rolled up, Enter now runs **Focus**: the note is brought to the front and receives keyboard focus. Hidden notes default to **Show** and rolled notes to **Unroll**, so Enter always moves a note one step towards open: hidden → shown → unrolled → focused. Image notes offer **Copy image** instead of **Copy text**; it replaces the clipboard with the note bitmap.

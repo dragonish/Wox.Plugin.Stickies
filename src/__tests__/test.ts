@@ -1,7 +1,7 @@
 import * as fs from "node:fs"
 import * as path from "node:path"
 import { ActionContext, Context, PublicAPI, Query, Result, WoxImage } from "@wox-launcher/wox-plugin"
-import { noteListMode, parseQuery, plugin } from "../index"
+import { noteListMode, notePreviewTags, parseQuery, plugin } from "../index"
 import { COMMANDS } from "../commands"
 import {
   buildGhostCommand,
@@ -9,22 +9,28 @@ import {
   buildStackStateCommand,
   buildTitleCommands,
   canFocusNote,
+  colorHex,
+  colorNameKey,
   contentTitle,
   decodeUnicode,
   encodeUnicode,
   formatCreatedTitle,
+  formatModified,
   matchNotes,
   matchStacks,
   normalizeBridgeOutput,
   normalizeTitleMode,
   noteDefaultAction,
+  parseColor,
   parseCreatedId,
   parseIdList,
+  parseModified,
   parseNoteReplies,
+  parsePosition,
   parseReply,
-  parseStackPosition,
+  parseSize,
   parseStackReplies,
-  parseStackSize,
+  parseTransparency,
   stackStateFromReply
 } from "../stickies"
 
@@ -142,7 +148,21 @@ describe("new note title modes", () => {
 })
 
 describe("note focus eligibility", () => {
-  const note = { id: "abc", title: "t", text: "body", image: false, rolled: false, hidden: false, ontop: false, ghost: false }
+  const note = {
+    id: "abc",
+    title: "t",
+    text: "body",
+    image: false,
+    rolled: false,
+    hidden: false,
+    ontop: false,
+    ghost: false,
+    position: null,
+    size: null,
+    color: null,
+    transparency: null,
+    modified: null
+  }
 
   test("offers focus only for visible, unrolled desktop notes", () => {
     expect(canFocusNote(note)).toBe(true)
@@ -153,7 +173,21 @@ describe("note focus eligibility", () => {
 })
 
 describe("note default action", () => {
-  const note = { id: "abc", title: "t", text: "body", image: false, rolled: false, hidden: false, ontop: false, ghost: false }
+  const note = {
+    id: "abc",
+    title: "t",
+    text: "body",
+    image: false,
+    rolled: false,
+    hidden: false,
+    ontop: false,
+    ghost: false,
+    position: null,
+    size: null,
+    color: null,
+    transparency: null,
+    modified: null
+  }
 
   test("reveals a hidden note before anything else", () => {
     expect(noteDefaultAction({ ...note, hidden: true })).toBe("show")
@@ -168,10 +202,66 @@ describe("note default action", () => {
 
 describe("note keyword matching", () => {
   const notes = [
-    { id: "n1", title: "Groceries", text: "buy milk and bread", image: false, rolled: false, hidden: false, ontop: false, ghost: false },
-    { id: "n2", title: "", text: "牛奶 待办 买面包", image: false, rolled: false, hidden: false, ontop: false, ghost: false },
-    { id: "n3", title: "milk", text: "already bought", image: false, rolled: false, hidden: false, ontop: false, ghost: false },
-    { id: "n4", title: "Price list", text: "cost 2.5 (usd)", image: false, rolled: false, hidden: false, ontop: false, ghost: false }
+    {
+      id: "n1",
+      title: "Groceries",
+      text: "buy milk and bread",
+      image: false,
+      rolled: false,
+      hidden: false,
+      ontop: false,
+      ghost: false,
+      position: null,
+      size: null,
+      color: null,
+      transparency: null,
+      modified: null
+    },
+    {
+      id: "n2",
+      title: "",
+      text: "牛奶 待办 买面包",
+      image: false,
+      rolled: false,
+      hidden: false,
+      ontop: false,
+      ghost: false,
+      position: null,
+      size: null,
+      color: null,
+      transparency: null,
+      modified: null
+    },
+    {
+      id: "n3",
+      title: "milk",
+      text: "already bought",
+      image: false,
+      rolled: false,
+      hidden: false,
+      ontop: false,
+      ghost: false,
+      position: null,
+      size: null,
+      color: null,
+      transparency: null,
+      modified: null
+    },
+    {
+      id: "n4",
+      title: "Price list",
+      text: "cost 2.5 (usd)",
+      image: false,
+      rolled: false,
+      hidden: false,
+      ontop: false,
+      ghost: false,
+      position: null,
+      size: null,
+      color: null,
+      transparency: null,
+      modified: null
+    }
   ]
   const ids = (list: Array<{ id: string }>): string[] => list.map(note => note.id)
 
@@ -205,7 +295,10 @@ describe("note keyword matching", () => {
   })
 
   test("matches image notes through localized image terms", () => {
-    const withImages = [...notes, { id: "img", title: "", text: "", image: true, rolled: false, hidden: false, ontop: false, ghost: false }]
+    const withImages = [
+      ...notes,
+      { id: "img", title: "", text: "", image: true, rolled: false, hidden: false, ontop: false, ghost: false, position: null, size: null, color: null, transparency: null, modified: null }
+    ]
     expect(ids(matchNotes(withImages, "图片"))).toEqual([])
     expect(ids(matchNotes(withImages, "图片", ["图片", "image"]))).toEqual(["img"])
     expect(ids(matchNotes(withImages, "IMAGE", ["图片", "image"]))).toEqual(["img"])
@@ -215,7 +308,21 @@ describe("note keyword matching", () => {
   })
 
   test("image note titles and bodies still match normally", () => {
-    const imageWithText = { id: "img", title: "截图", text: "image of a chart", image: true, rolled: false, hidden: false, ontop: false, ghost: false }
+    const imageWithText = {
+      id: "img",
+      title: "截图",
+      text: "image of a chart",
+      image: true,
+      rolled: false,
+      hidden: false,
+      ontop: false,
+      ghost: false,
+      position: null,
+      size: null,
+      color: null,
+      transparency: null,
+      modified: null
+    }
     expect(ids(matchNotes([imageWithText], "截图"))).toEqual(["img"])
     expect(ids(matchNotes([imageWithText], "chart"))).toEqual(["img"])
   })
@@ -278,23 +385,59 @@ describe("note click-through command", () => {
 
 describe("batched note reply parsing", () => {
   const reply = (code: string, text = "") => ({ code, text, raw: code + (text ? " " + text : "") })
-  const group = (title: string, text: string, rolled: string, hidden: string, type: string, ontop = "0", ghost = "0") => [
+  const group = (title: string, text: string, rolled: string, hidden: string, type: string, ontop = "0", ghost = "0", position = "", size = "", color = "", transparency = "", modified = "") => [
     reply("001", title),
     reply("001", text),
     reply("001", rolled),
     reply("001", hidden),
     reply("001", type),
     reply("001", ontop),
-    reply("001", ghost)
+    reply("001", ghost),
+    reply("001", position),
+    reply("001", size),
+    reply("001", color),
+    reply("001", transparency),
+    reply("001", modified)
   ]
 
-  test("reads title, text, image, rolled, hidden, ontop and ghost for every id", () => {
-    const replies = [...group(encodeUnicode("Title A"), encodeUnicode("Body A"), "0", "1", "0", "1", "0"), ...group("", "", "1", "0", "1", "0", "1")]
+  test("reads title, text, flags, geometry, colour, transparency and modified for every id", () => {
+    const replies = [
+      ...group(encodeUnicode("Title A"), encodeUnicode("Body A"), "0", "1", "0", "1", "0", "3294,552", "406x100", "230,230,230", "90", "1761640452 2025 10 28 16 34 12 3"),
+      ...group("", "", "1", "0", "1", "0", "1", "-10,20", "200x50", "255,204,204", "100", "1700000000 2023 11 14 9 5 3 2")
+    ]
     const notes = parseNoteReplies(["a", "b"], replies)
 
     expect(notes).toEqual([
-      { id: "a", title: "Title A", text: "Body A", image: false, rolled: false, hidden: true, ontop: true, ghost: false },
-      { id: "b", title: "", text: "", image: true, rolled: true, hidden: false, ontop: false, ghost: true }
+      {
+        id: "a",
+        title: "Title A",
+        text: "Body A",
+        image: false,
+        rolled: false,
+        hidden: true,
+        ontop: true,
+        ghost: false,
+        position: { x: 3294, y: 552 },
+        size: { width: 406, height: 100 },
+        color: { r: 230, g: 230, b: 230 },
+        transparency: 90,
+        modified: { epoch: 1761640452, year: 2025, month: 10, day: 28, hours: 16, minutes: 34, seconds: 12 }
+      },
+      {
+        id: "b",
+        title: "",
+        text: "",
+        image: true,
+        rolled: true,
+        hidden: false,
+        ontop: false,
+        ghost: true,
+        position: { x: -10, y: 20 },
+        size: { width: 200, height: 50 },
+        color: { r: 255, g: 204, b: 204 },
+        transparency: 100,
+        modified: { epoch: 1700000000, year: 2023, month: 11, day: 14, hours: 9, minutes: 5, seconds: 3 }
+      }
     ])
   })
 
@@ -312,6 +455,22 @@ describe("batched note reply parsing", () => {
 
     const failed = parseNoteReplies(["a"], [...group("", "", "0", "0", "0").slice(0, 6), reply("998", "sticky not found")])
     expect(failed[0].ghost).toBe(false)
+  })
+
+  test("keeps geometry and attributes missing instead of failing the whole note", () => {
+    const missing = parseNoteReplies(["a"], group("", "", "0", "0", "0"))
+    expect(missing[0].position).toBeNull()
+    expect(missing[0].size).toBeNull()
+    expect(missing[0].color).toBeNull()
+    expect(missing[0].transparency).toBeNull()
+    expect(missing[0].modified).toBeNull()
+
+    const failed = parseNoteReplies(["a"], [...group("", "", "0", "0", "0").slice(0, 7), reply("998", "sticky not found"), reply("998", "sticky not found"), reply("997", "no data")])
+    expect(failed[0].position).toBeNull()
+    expect(failed[0].size).toBeNull()
+    expect(failed[0].color).toBeNull()
+    expect(failed[0].transparency).toBeNull()
+    expect(failed[0].modified).toBeNull()
   })
 
   test("falls back to the first body line when the title is empty", () => {
@@ -334,21 +493,141 @@ describe("batched note reply parsing", () => {
   })
 })
 
-describe("stack geometry parsing", () => {
+describe("note attribute parsing", () => {
+  test("parses comma-separated colours and rejects out-of-range values", () => {
+    expect(parseColor("230,230,230")).toEqual({ r: 230, g: 230, b: 230 })
+    expect(parseColor(" 0 , 10 , 255 ")).toEqual({ r: 0, g: 10, b: 255 })
+    expect(parseColor("")).toBeNull()
+    expect(parseColor("230,230")).toBeNull()
+    expect(parseColor("256,0,0")).toBeNull()
+    expect(parseColor("red,green,blue")).toBeNull()
+  })
+
+  test("parses the transparency percentage", () => {
+    expect(parseTransparency("90")).toBe(90)
+    expect(parseTransparency("0")).toBe(0)
+    expect(parseTransparency("100")).toBe(100)
+    expect(parseTransparency("101")).toBeNull()
+    expect(parseTransparency("")).toBeNull()
+    expect(parseTransparency("90%")).toBeNull()
+  })
+
+  test("parses the modified time fields and ignores the trailing weekday", () => {
+    expect(parseModified("1761640452 2025 10 28 16 34 12 3")).toEqual({
+      epoch: 1761640452,
+      year: 2025,
+      month: 10,
+      day: 28,
+      hours: 16,
+      minutes: 34,
+      seconds: 12
+    })
+    expect(parseModified("997 no data")).toBeNull()
+    expect(parseModified("1761640452 2025 10 28")).toBeNull()
+    expect(parseModified("")).toBeNull()
+  })
+
+  test("formats the modified time with zero padding", () => {
+    expect(formatModified({ epoch: 0, year: 2025, month: 1, day: 5, hours: 9, minutes: 7, seconds: 0 })).toBe("2025-01-05 09:07")
+  })
+
+  test("formats colours as uppercase hex", () => {
+    expect(colorHex({ r: 230, g: 230, b: 230 })).toBe("#E6E6E6")
+    expect(colorHex({ r: 0, g: 10, b: 255 })).toBe("#000AFF")
+  })
+
+  test("names only exact palette matches", () => {
+    expect(colorNameKey({ r: 230, g: 230, b: 230 })).toBe("grey")
+    expect(colorNameKey({ r: 255, g: 204, b: 204 })).toBe("pink")
+    expect(colorNameKey({ r: 229, g: 230, b: 230 })).toBeNull()
+    expect(colorNameKey({ r: 1, g: 2, b: 3 })).toBeNull()
+  })
+})
+
+describe("note preview tags", () => {
+  const note = {
+    id: "abc",
+    title: "t",
+    text: "body",
+    image: false,
+    rolled: false,
+    hidden: false,
+    ontop: false,
+    ghost: false,
+    position: { x: 3294, y: 552 },
+    size: { width: 406, height: 100 },
+    color: { r: 230, g: 230, b: 230 },
+    transparency: 90,
+    modified: { epoch: 1761640452, year: 2025, month: 10, day: 28, hours: 16, minutes: 34, seconds: 12 }
+  }
+  const labels = {
+    tagPosition: "Position",
+    tagSize: "Size",
+    tagModified: "Modified",
+    tagColor: "Color",
+    tagTransparency: "Transparency",
+    colorNames: {
+      grey: "Grey",
+      white: "White",
+      yellow: "Yellow",
+      green: "Green",
+      blue: "Blue",
+      pink: "Pink",
+      purple: "Purple",
+      orange: "Orange"
+    }
+  }
+
+  test("shows every attribute as a chip with a localized tooltip", () => {
+    expect(notePreviewTags(note, labels)).toEqual([
+      { Label: "3294,552", Tooltip: "Position" },
+      { Label: "406x100", Tooltip: "Size" },
+      { Label: "2025-10-28 16:34", Tooltip: "Modified" },
+      { Label: "Grey #E6E6E6", Tooltip: "Color" },
+      { Label: "90%", Tooltip: "Transparency" }
+    ])
+  })
+
+  test("renders negative coordinates and unknown colours verbatim", () => {
+    expect(notePreviewTags({ ...note, position: { x: -10, y: 20 }, size: null, color: { r: 1, g: 2, b: 3 } }, labels)).toEqual([
+      { Label: "-10,20", Tooltip: "Position" },
+      { Label: "2025-10-28 16:34", Tooltip: "Modified" },
+      { Label: "#010203", Tooltip: "Color" },
+      { Label: "90%", Tooltip: "Transparency" }
+    ])
+  })
+
+  test("hides the transparency chip when the note is opaque", () => {
+    for (const transparency of [0, 100]) {
+      const shown = notePreviewTags({ ...note, transparency }, labels).map(tag => tag.Label)
+      expect(shown).not.toContain(transparency + "%")
+    }
+  })
+
+  test("omits missing values instead of showing placeholders", () => {
+    expect(notePreviewTags({ ...note, position: null }, labels)[0].Label).toBe("406x100")
+    expect(notePreviewTags({ ...note, size: null }, labels)[0].Label).toBe("3294,552")
+    expect(notePreviewTags({ ...note, modified: null }, labels).map(tag => tag.Label)).not.toContain("2025-10-28 16:34")
+    expect(notePreviewTags({ ...note, color: null }, labels).map(tag => tag.Label)).toEqual(["3294,552", "406x100", "2025-10-28 16:34", "90%"])
+    expect(notePreviewTags({ ...note, position: null, size: null, modified: null, color: null, transparency: null }, labels)).toEqual([])
+  })
+})
+
+describe("note and stack geometry parsing", () => {
   test("parses screen positions, including negative coordinates", () => {
-    expect(parseStackPosition("3294,552")).toEqual({ x: 3294, y: 552 })
-    expect(parseStackPosition(" -100 , 20 ")).toEqual({ x: -100, y: 20 })
-    expect(parseStackPosition("")).toBeNull()
-    expect(parseStackPosition("garbage")).toBeNull()
-    expect(parseStackPosition("10")).toBeNull()
+    expect(parsePosition("3294,552")).toEqual({ x: 3294, y: 552 })
+    expect(parsePosition(" -100 , 20 ")).toEqual({ x: -100, y: 20 })
+    expect(parsePosition("")).toBeNull()
+    expect(parsePosition("garbage")).toBeNull()
+    expect(parsePosition("10")).toBeNull()
   })
 
   test("parses sizes written as WxH", () => {
-    expect(parseStackSize("406x100")).toEqual({ width: 406, height: 100 })
-    expect(parseStackSize("406X100")).toEqual({ width: 406, height: 100 })
-    expect(parseStackSize(" 20 x 10 ")).toEqual({ width: 20, height: 10 })
-    expect(parseStackSize("")).toBeNull()
-    expect(parseStackSize("406*100")).toBeNull()
+    expect(parseSize("406x100")).toEqual({ width: 406, height: 100 })
+    expect(parseSize("406X100")).toEqual({ width: 406, height: 100 })
+    expect(parseSize(" 20 x 10 ")).toEqual({ width: 20, height: 10 })
+    expect(parseSize("")).toBeNull()
+    expect(parseSize("406*100")).toBeNull()
   })
 })
 
